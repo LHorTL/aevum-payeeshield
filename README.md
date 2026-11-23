@@ -1,7 +1,9 @@
 # PayeeShield — ERC-8004 Confirmation-of-Payee & `tUSD8` Merchant Invoice Escrow
 
 > **Built for [Aevum Builder Challenge #1](https://dorahacks.io/hackathon/qday) on QDay Aevum Testnet (Chain ID `44005`)**  
-> **Tracks:** Confirmation of Payee (CoP) · Invoice Payments (`tUSD8` · 6 decimals)
+> **Tracks:** Confirmation of Payee (CoP) · Invoice Payments (`tUSD8` · 6 decimals)  
+> **Live Interactive Web dApp (GitHub Pages):** https://lhortl.github.io/aevum-payeeshield/  
+> **Source Repository:** https://github.com/LHorTL/aevum-payeeshield
 
 **PayeeShield** brings UK Pay.UK / EU Verification-of-Payee (VoP) security guarantees on-chain for B2B stablecoin invoices and autonomous AI agent payments. Before a **single base unit of `tUSD8`** moves, PayeeShield cryptographically verifies the merchant's **ERC-8004 Identity NFT**, strict ASCII normalized handle, legal entity hash, active `agentWallet`, KYB attestation status, wallet-rotation cooldown state, and every secondary multi-party split recipient — hard-reverting spoofed, hijacked, or revoked payees with `0 wei` lost.
 
