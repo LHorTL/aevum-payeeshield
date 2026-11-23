@@ -355,13 +355,55 @@ export default function App() {
     });
   };
 
-  // Escrow Release (re-verifies CoP before payout!)
+  // Mirrors Solidity `_findInvalidatedAgent` + split checks (checks primary AND all split legs)
+  const findInvalidatedEscrowPayee = (inv, payeesList) => {
+    const primaryCheck = evaluateCoP(payeesList, {
+      handle: inv.expectedHandle,
+      legalName: inv.expectedLegalName,
+      payoutWallet: inv.expectedPayoutWallet
+    });
+    if (
+      primaryCheck.status !== COP_STATUS.EXACT_MATCH &&
+      primaryCheck.status !== COP_STATUS.WALLET_ROTATION_PENDING
+    ) {
+      return {
+        agentId: inv.payeeAgentId,
+        reason:
+          primaryCheck.status === COP_STATUS.PAYEE_REVOKED
+            ? `PayeeRevoked(${inv.payeeAgentId})`
+            : primaryCheck.revertError || `PayeeMismatch(${primaryCheck.status})`
+      };
+    }
+    for (let i = 0; i < inv.splits.length; i++) {
+      const leg = inv.splits[i];
+      const lp = payeesList.find((p) => p.agentId === leg.agentId);
+      if (!lp || lp.revoked) {
+        return { agentId: leg.agentId, reason: `PayeeRevoked(${leg.agentId}) on split leg #${i + 1}` };
+      }
+      if (lp.payoutWallet.toLowerCase() !== leg.expectedWallet.toLowerCase()) {
+        return { agentId: leg.agentId, reason: `SplitPayeeCheckFailed(${i}, ${leg.agentId})` };
+      }
+    }
+    return null;
+  };
+
+  // Escrow Release (re-verifies primary CoP, strict rotation lock, AND all split legs!)
   const handleReleaseEscrowSim = (invoiceId) => {
     const inv = sim.invoices.find((i) => i.id === invoiceId);
     if (!inv || inv.status !== "FUNDED") return;
+    const invalidated = findInvalidatedEscrowPayee(inv, sim.payees);
+    if (invalidated) {
+      const err = `REVERT ${invalidated.reason} at release time — buyer can invoke Emergency 100% Refund!`;
+      setSim((prev) => ({
+        ...prev,
+        invoices: prev.invoices.map((x) => (x.id === invoiceId ? { ...x, lastBlockReason: err } : x))
+      }));
+      appendLog("BLOCKED", `Release Blocked for Escrow #${invoiceId}`, err);
+      return;
+    }
     const primary = sim.payees.find((p) => p.agentId === inv.payeeAgentId);
-    if (!primary || primary.revoked) {
-      const err = `REVERT PayeeRevoked(${inv.payeeAgentId}) at release time — buyer can invoke Emergency 100% Refund!`;
+    if (inv.strictNoPendingRotation && primary?.pendingPayoutWallet) {
+      const err = `REVERT PayeeRotationPending(${inv.payeeAgentId}) at release time — wallet rotation cooldown active!`;
       setSim((prev) => ({
         ...prev,
         invoices: prev.invoices.map((x) => (x.id === invoiceId ? { ...x, lastBlockReason: err } : x))
@@ -430,9 +472,24 @@ export default function App() {
     const buyerRefund = (inv.amount * BigInt(refundBps)) / 10_000n;
     const payeePortion = inv.amount - buyerRefund;
 
-    if (payeePortion > 0n && (!primary || primary.revoked)) {
-      appendLog("BLOCKED", `Arbiter Payout Blocked (#${invoiceId})`, `REVERT PayeeRevoked(${inv.payeeAgentId}): revoked payee cannot receive dispute share. Set refund to 100%.`);
-      return;
+    if (payeePortion > 0n) {
+      const invalidated = findInvalidatedEscrowPayee(inv, sim.payees);
+      if (invalidated) {
+        appendLog(
+          "BLOCKED",
+          `Arbiter Payout Blocked (#${invoiceId})`,
+          `REVERT ${invalidated.reason}: invalidated/revoked payee or split leg cannot receive dispute share. Set refund to 100%.`
+        );
+        return;
+      }
+      if (inv.strictNoPendingRotation && primary?.pendingPayoutWallet) {
+        appendLog(
+          "BLOCKED",
+          `Arbiter Payout Blocked (#${invoiceId})`,
+          `REVERT PayeeRotationPending(${inv.payeeAgentId}): wallet rotation cooldown active.`
+        );
+        return;
+      }
     }
 
     const computedSplits = payeePortion > 0n ? computeDustFreeSplits(payeePortion, inv.splits) : [];
@@ -476,12 +533,12 @@ export default function App() {
     });
   };
 
-  // Emergency Refund if Payee Revoked Post-Funding
+  // Emergency Refund if Primary Payee OR Any Split Leg Invalidated/Revoked Post-Funding
   const handleEmergencyRefundSim = (invoiceId) => {
     const inv = sim.invoices.find((i) => i.id === invoiceId);
     if (!inv || (inv.status !== "FUNDED" && inv.status !== "DISPUTED")) return;
-    const primary = sim.payees.find((p) => p.agentId === inv.payeeAgentId);
-    if (!primary || !primary.revoked) return;
+    const invalidated = findInvalidatedEscrowPayee(inv, sim.payees);
+    if (!invalidated) return;
 
     const receiptHash = computeReceiptHash({
       invoiceId: inv.id,
@@ -510,8 +567,8 @@ export default function App() {
             id: `log-${Date.now()}`,
             time: new Date().toLocaleTimeString(),
             kind: "SUCCESS",
-            title: `Emergency Revocation Refund Executed (#${invoiceId})`,
-            detail: `100% of ${formatTUSD8(inv.amount)} tUSD8 reclaimed by buyer after ERC-8004 #${inv.payeeAgentId} revocation.`
+            title: `Emergency Refund Executed (#${invoiceId})`,
+            detail: `100% of ${formatTUSD8(inv.amount)} tUSD8 reclaimed by buyer (${invalidated.reason}).`
           },
           ...prev.auditLog
         ]
@@ -1238,25 +1295,28 @@ export default function App() {
                     </button>
                   )}
 
-                  {inv.status === "FUNDED" && (
-                    <>
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => handleReleaseEscrowSim(inv.id)}>
-                        <CheckCircle2 size={14} /> Buyer Confirm &amp; Release Splits
-                      </button>
-                      <button type="button" className="btn btn-amber btn-sm" onClick={() => handleOpenDisputeSim(inv.id)}>
-                        <Scale size={14} /> Open Buyer Dispute
-                      </button>
-                      {payee && !payee.revoked ? (
-                        <button type="button" className="btn btn-danger btn-sm" onClick={() => toggleRevokeSim(inv.payeeAgentId)}>
-                          <Ban size={14} /> Simulate Post-Funding Payee Compromise (Revoke)
+                  {inv.status === "FUNDED" && (() => {
+                    const invInvalidated = findInvalidatedEscrowPayee(inv, sim.payees);
+                    return (
+                      <>
+                        <button type="button" className="btn btn-primary btn-sm" onClick={() => handleReleaseEscrowSim(inv.id)}>
+                          <CheckCircle2 size={14} /> Buyer Confirm &amp; Release Splits
                         </button>
-                      ) : (
-                        <button type="button" className="btn btn-cyan btn-sm" onClick={() => handleEmergencyRefundSim(inv.id)}>
-                          <ShieldCheck size={14} /> Execute Emergency 100% Buyer Refund
+                        <button type="button" className="btn btn-amber btn-sm" onClick={() => handleOpenDisputeSim(inv.id)}>
+                          <Scale size={14} /> Open Buyer Dispute
                         </button>
-                      )}
-                    </>
-                  )}
+                        {!invInvalidated ? (
+                          <button type="button" className="btn btn-danger btn-sm" onClick={() => toggleRevokeSim(inv.payeeAgentId)}>
+                            <Ban size={14} /> Simulate Post-Funding Payee Compromise (Revoke)
+                          </button>
+                        ) : (
+                          <button type="button" className="btn btn-cyan btn-sm" onClick={() => handleEmergencyRefundSim(inv.id)}>
+                            <ShieldCheck size={14} /> Execute Emergency 100% Buyer Refund
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {inv.status === "DISPUTED" && (
                     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, width: "100%" }}>
@@ -1278,7 +1338,7 @@ export default function App() {
                       >
                         <Scale size={14} /> Arbiter Resolve Dispute
                       </button>
-                      {payee?.revoked && (
+                      {findInvalidatedEscrowPayee(inv, sim.payees) && (
                         <button type="button" className="btn btn-cyan btn-sm" onClick={() => handleEmergencyRefundSim(inv.id)}>
                           Emergency 100% Refund
                         </button>

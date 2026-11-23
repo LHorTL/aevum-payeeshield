@@ -507,7 +507,7 @@ export function createInitialSimState() {
       time: new Date().toLocaleTimeString(),
       kind: "INFO",
       title: "PayeeShield Simulation Engine Ready",
-      detail: "Mirrors ERC8004PayeeRegistry + PayeeShieldInvoiceEscrow (Chain ID 44005 · tUSD8 6dp · 32/32 Hardhat tests PASS)."
+      detail: "Mirrors ERC8004PayeeRegistry + PayeeShieldInvoiceEscrow (Chain ID 44005 · tUSD8 6dp · 38/38 Hardhat tests PASS)."
     }
   ];
 

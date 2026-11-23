@@ -73,7 +73,7 @@ aevum-payeeshield/
 │       ├── ReentrantTUSD8.sol                 # Adversarial reentrancy test double
 │       └── MockERC1271Wallet.sol              # Smart-account EIP-1271 verification mock
 ├── test/
-│   └── PayeeShield.test.js                    # 32 unit & adversarial security tests (100% PASS)
+│   └── PayeeShield.test.js                    # 38 unit & adversarial security tests (100% PASS)
 ├── scripts/
 │   ├── generate-deployer.mjs                  # Creates gitignored .env deployer wallet (never prints private key)
 │   ├── deploy.mjs                             # One-command live Aevum Testnet (44005) deployment + web config sync
@@ -93,21 +93,21 @@ aevum-payeeshield/
 
 ## Quick Start & Verification Proofs
 
-### 1. Install & Run Smart Contract Security Suite (**32/32 PASS**)
+### 1. Install & Run Smart Contract Security Suite (**38/38 PASS**)
 
 ```bash
 npm install
 npm test
 ```
 
-Latest verified test run (`evm target: shanghai`, OpenZeppelin `5.1.0`):
-- **1. ERC-8004 Identity Registry & Homoglyph Defense** — `7/7 PASS`
+Latest verified test run (`evm target: shanghai`, OpenZeppelin `5.1.0`, zero Cancun opcodes):
+- **1. ERC-8004 Identity Registry, CEI `_safeMint` Guard, KYB Epochs & Homoglyph Defense** — `9/9 PASS`
 - **2. Confirmation-of-Payee Pre-Flight & Settlement Gate** — `7/7 PASS`
-- **3. EIP-712 CoP Receipts, ERC-1271 Smart Wallets & Replay Defense** — `3/3 PASS`
+- **3. EIP-712 CoP Receipts, ERC-1271 Smart Wallets & Cross-Escrow Replay Defense** — `4/4 PASS`
 - **4. Multi-Party BPS Splits, 0-Wei Dust & $1B Overflow Invariants** — `5/5 PASS`
-- **5. Milestone Escrow, Disputes, Expiry & Post-Funding Revocation Refund** — `6/6 PASS`
-- **6. Adversarial Reentrancy, RBAC Access Control & Pause Circuit Breaker** — `4/4 PASS`
-- **Total: `32 passing (2s)`**
+- **5. Milestone Escrow, Disputes (Paused-Safe), Rotation Lock & Zero-Stuck-Funds Emergency Exit** — `8/8 PASS`
+- **6. Adversarial Reentrancy, RBAC Access Control, Zero-Hash Rejection & Pause Circuit Breaker** — `5/5 PASS`
+- **Total: `38 passing (2s)`**
 
 ### 2. Local End-to-End Settlement Proof
 

@@ -11,7 +11,8 @@
     "deploy:local": "hardhat run scripts/deploy-hardhat.js",
     "deploy:aevum": "node scripts/deploy.mjs",
     "verify:aevum": "node scripts/verify-blockscout.mjs",
-    "web:install": "npm install --prefix web --no-save",
+    "build": "npm --prefix web run build",
+    "web:install": "node -e \"require('child_process').execSync('npm install',{cwd:'web',stdio:'inherit'})\"",
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
     "e2e": "python scripts/e2e_smoke.py"

@@ -5,7 +5,8 @@ pragma solidity ^0.8.26;
  * @title IERC8004PayeeRegistry
  * @notice ERC-8004 Trustless Agents Identity Registry interface extended with
  *         Confirmation-of-Payee (CoP) verification, timelocked payout wallet
- *         rotation, revocation, and EIP-712 signed verification receipts.
+ *         rotation, revocation, profile-epoch KYB attestations, and EIP-712
+ *         signed verification receipts.
  */
 interface IERC8004PayeeRegistry {
     /// @notice Structured key-value metadata entry per ERC-8004 Identity Registry.
@@ -35,6 +36,7 @@ interface IERC8004PayeeRegistry {
         uint64 rotationExecutableAt;
         uint64 registeredAt;
         uint64 updatedAt;
+        uint64 profileEpoch;
         bool revoked;
         uint32 activeAttestations;
     }
@@ -50,7 +52,7 @@ interface IERC8004PayeeRegistry {
         bool isAttested;
     }
 
-    /// @notice Verifiable third-party KYB / compliance attestation record.
+    /// @notice Verifiable third-party KYB / compliance attestation record bound to a `profileEpoch`.
     struct Attestation {
         bytes32 attestationId;
         address attester;
@@ -58,6 +60,7 @@ interface IERC8004PayeeRegistry {
         bytes32 evidenceHash;
         uint64 issuedAt;
         uint64 expiresAt;
+        uint64 profileEpoch;
         bool revoked;
     }
 
@@ -73,7 +76,8 @@ interface IERC8004PayeeRegistry {
         bytes32 indexed handleHash,
         string handle,
         bytes32 legalEntityHash,
-        address indexed payoutWallet
+        address indexed payoutWallet,
+        uint64 profileEpoch
     );
     event PayoutWalletRotationProposed(
         uint256 indexed agentId,
@@ -89,7 +93,8 @@ interface IERC8004PayeeRegistry {
         address indexed attester,
         bytes32 schemaId,
         bytes32 evidenceHash,
-        uint64 expiresAt
+        uint64 expiresAt,
+        uint64 profileEpoch
     );
     event AttestationRevoked(uint256 indexed agentId, bytes32 indexed attestationId, address indexed revokedBy);
 

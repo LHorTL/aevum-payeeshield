@@ -309,6 +309,75 @@ describe("PayeeShield — ERC-8004 Confirmation-of-Payee & tUSD8 Invoice Escrow"
       expect(await registry.isPayeeRevoked(1n)).to.equal(true);
       expect(await registry.getAgentWallet(1n)).to.equal(ethers.ZeroAddress);
     });
+
+    it("1.8 blocks _safeMint onERC721Received reentrancy & preserves transfer-safety wallet reset", async function () {
+      const { registry, buyer } = await deployFixture();
+      const AttackerFactory = await ethers.getContractFactory("ReentrantERC721Receiver");
+      const evilReceiver = await AttackerFactory.deploy(await registry.getAddress());
+
+      // Mode 1: re-enter registerPayee with identical handle inside onERC721Received -> MUST fail
+      const tx1 = await evilReceiver.launchRegisterAttack(1, buyer.address, "reenter.brand", hashStr("Reenter Ltd"));
+      await tx1.wait();
+      expect(await evilReceiver.callbackHit()).to.equal(true);
+      expect(await evilReceiver.reentrySucceeded()).to.equal(false);
+      // Only one NFT minted for that handle
+      const id1 = await registry.agentIdByHandleHash(hashStr("reenter.brand"));
+      expect(id1).to.equal(await registry.totalAgents());
+
+      // Mode 2: transferFrom inside onERC721Received -> payoutWallet MUST stay 0x0 (never overwritten!)
+      const tx2 = await evilReceiver.launchRegisterAttack(2, buyer.address, "xfer.callback", hashStr("Xfer Ltd"));
+      await tx2.wait();
+      expect(await evilReceiver.callbackHit()).to.equal(true);
+      expect(await evilReceiver.transferInsideCallbackSucceeded()).to.equal(true);
+      const id2 = await registry.agentIdByHandleHash(hashStr("xfer.callback"));
+      expect(await registry.ownerOf(id2)).to.equal(buyer.address);
+      expect(await registry.getAgentWallet(id2)).to.equal(ethers.ZeroAddress);
+      expect((await registry.getPayeeProfile(id2)).profileEpoch).to.equal(2n);
+      expect(await registry.walletNonces(id2)).to.equal(1n);
+    });
+
+    it("1.9 invalidates KYB attestations on bindPayeeProfile/transfer, avoids duplicate revoke event, caps attestations at 64", async function () {
+      const { registry, admin, attester, merchant, attacker, rotatedWallet } = await deployFixture();
+
+      // 1) Merchant is KYB attested at epoch 1
+      expect(await registry.hasValidAttestation(1n)).to.equal(true);
+      expect((await registry.getPayeeProfile(1n)).profileEpoch).to.equal(1n);
+
+      // Switching handle/legal via bindPayeeProfile bumps profileEpoch -> invalidates prior KYB attestation!
+      await registry.connect(merchant).bindPayeeProfile(1n, "spoofed.brand", hashStr("Other Entity LLC"));
+      expect((await registry.getPayeeProfile(1n)).profileEpoch).to.equal(2n);
+      expect(await registry.hasValidAttestation(1n)).to.equal(false);
+
+      // Re-attest at epoch 2, then sign a pre-transfer setAgentWallet sig, then transfer NFT
+      await registry.connect(attester).issueAttestation(1n, SCHEMA_KYB, EVIDENCE_HASH, 0);
+      expect(await registry.hasValidAttestation(1n)).to.equal(true);
+
+      const now = BigInt(await time.latest());
+      const preTransferNonce = await registry.walletNonces(1n);
+      const staleSig = await signSetAgentWallet(registry, rotatedWallet, 1n, rotatedWallet.address, preTransferNonce, now + 600n);
+
+      await registry.connect(merchant).transferFrom(merchant.address, attacker.address, 1n);
+      expect((await registry.getPayeeProfile(1n)).profileEpoch).to.equal(3n);
+      expect(await registry.hasValidAttestation(1n)).to.equal(false);
+      // Pre-transfer setAgentWallet sig is invalidated because walletNonces bumped on transfer!
+      await expect(
+        registry.connect(attacker).setAgentWallet(1n, rotatedWallet.address, now + 600n, staleSig)
+      ).to.be.revertedWithCustomError(registry, "InvalidWalletSignature");
+
+      // 2) revokePayee zeroes storage payoutWallet so subsequent NFT transfer emits NO duplicate AgentWalletUpdated
+      await registry.connect(admin).revokePayee(2n, hashStr("REVOKE_NO_DUP"));
+      const [, , , , taxVault] = await ethers.getSigners();
+      const xferTx = await registry.connect(taxVault).transferFrom(taxVault.address, attacker.address, 2n);
+      await expect(xferTx).to.not.emit(registry, "AgentWalletUpdated");
+
+      // 3) MAX_ATTESTATIONS_PER_AGENT (64) cap enforced on agent #3
+      for (let i = 0; i < 64; i++) {
+        await registry.connect(attester).issueAttestation(3n, SCHEMA_KYB, hashStr("EVID-" + i), 0);
+      }
+      await expect(
+        registry.connect(attester).issueAttestation(3n, SCHEMA_KYB, hashStr("EVID-65"), 0)
+      ).to.be.revertedWithCustomError(registry, "MaxAttestationsReached").withArgs(3n);
+    });
   });
 
   // ===========================================================================
@@ -578,29 +647,38 @@ describe("PayeeShield — ERC-8004 Confirmation-of-Payee & tUSD8 Invoice Escrow"
       await escrow.connect(merchant).createInvoice(params, splits); // invoice 1
       await escrow.connect(merchant).createInvoice(params, splits); // invoice 2
 
-      const invoiceSalt = hashStr("SALT-001");
+      const userSalt = hashStr("SALT-001");
+      const boundSalt1 = await escrow.computeBoundInvoiceSalt(1n, userSalt);
       const deadline = now + 900n;
       const sig = await signCoPReceipt(registry, attester, {
         agentId: 1n,
         handleHash: merchantHandleHash,
         legalEntityHash: merchantLegal,
         payoutWallet: merchant.address,
-        invoiceSalt,
+        invoiceSalt: boundSalt1,
         nonce: 77n,
         deadline
       });
 
       await escrow.connect(buyer).payInvoiceWithCoPProof(
         1n, merchantHandleHash, merchantLegal, merchant.address,
-        attester.address, invoiceSalt, 77n, deadline, sig
+        attester.address, userSalt, 77n, deadline, sig
       );
       expect((await escrow.getInvoice(1n)).status).to.equal(InvoiceStatus.SETTLED);
 
-      // Replaying the exact same CoP receipt against invoice #2 MUST revert
+      // Replaying the exact same CoP receipt against invoice #2 MUST revert (bound salt mismatch -> InvalidCoPSignature)
       await expect(
         escrow.connect(buyer).payInvoiceWithCoPProof(
           2n, merchantHandleHash, merchantLegal, merchant.address,
-          attester.address, invoiceSalt, 77n, deadline, sig
+          attester.address, userSalt, 77n, deadline, sig
+        )
+      ).to.be.revertedWithCustomError(escrow, "InvalidCoPSignature");
+
+      // Even re-submitting for invoice #1 hits CoPReceiptAlreadyUsed before payment execution
+      await expect(
+        escrow.connect(buyer).payInvoiceWithCoPProof(
+          1n, merchantHandleHash, merchantLegal, merchant.address,
+          attester.address, userSalt, 77n, deadline, sig
         )
       ).to.be.revertedWithCustomError(escrow, "CoPReceiptAlreadyUsed");
     });
@@ -627,10 +705,11 @@ describe("PayeeShield — ERC-8004 Confirmation-of-Payee & tUSD8 Invoice Escrow"
       );
 
       const salt = hashStr("SALT-002");
+      const boundSalt = await escrow.computeBoundInvoiceSalt(1n, salt);
       // Attacker spoofs receipt
       const badSig = await signCoPReceipt(registry, attacker, {
         agentId: 1n, handleHash: merchantHandleHash, legalEntityHash: merchantLegal,
-        payoutWallet: merchant.address, invoiceSalt: salt, nonce: 1n, deadline: now + 600n
+        payoutWallet: merchant.address, invoiceSalt: boundSalt, nonce: 1n, deadline: now + 600n
       });
       await expect(
         escrow.connect(buyer).payInvoiceWithCoPProof(
@@ -642,7 +721,7 @@ describe("PayeeShield — ERC-8004 Confirmation-of-Payee & tUSD8 Invoice Escrow"
       // Expired receipt
       const expSig = await signCoPReceipt(registry, merchant, {
         agentId: 1n, handleHash: merchantHandleHash, legalEntityHash: merchantLegal,
-        payoutWallet: merchant.address, invoiceSalt: salt, nonce: 2n, deadline: now - 10n
+        payoutWallet: merchant.address, invoiceSalt: boundSalt, nonce: 2n, deadline: now - 10n
       });
       await expect(
         escrow.connect(buyer).payInvoiceWithCoPProof(
@@ -654,7 +733,7 @@ describe("PayeeShield — ERC-8004 Confirmation-of-Payee & tUSD8 Invoice Escrow"
       // Valid self-signed by active payee payoutWallet succeeds
       const okSig = await signCoPReceipt(registry, merchant, {
         agentId: 1n, handleHash: merchantHandleHash, legalEntityHash: merchantLegal,
-        payoutWallet: merchant.address, invoiceSalt: salt, nonce: 3n, deadline: now + 600n
+        payoutWallet: merchant.address, invoiceSalt: boundSalt, nonce: 3n, deadline: now + 600n
       });
       await escrow.connect(buyer).payInvoiceWithCoPProof(
         1n, merchantHandleHash, merchantLegal, merchant.address,
@@ -692,6 +771,68 @@ describe("PayeeShield — ERC-8004 Confirmation-of-Payee & tUSD8 Invoice Escrow"
         1n, merchantHandleHash, merchantLegal, smartAddr, salt, 9n, now + 600n, smartAddr, copSig
       );
       expect(valid).to.equal(true);
+    });
+
+    it("3.4 rejects attester-signed CoP receipt after revocation/rotation and blocks cross-escrow replay", async function () {
+      const { tusd8, registry, escrow, admin, arbiter, attester, merchant, buyer, merchantHandleHash, merchantLegal } =
+        await deployFixture();
+
+      // Deploy a SECOND escrow sharing the same ERC-8004 registry
+      const Escrow = await ethers.getContractFactory("PayeeShieldInvoiceEscrow");
+      const escrow2 = await Escrow.deploy(await tusd8.getAddress(), await registry.getAddress(), admin.address, arbiter.address);
+      await tusd8.connect(buyer).approve(await escrow2.getAddress(), ethers.MaxUint256);
+
+      const now = BigInt(await time.latest());
+      const invParams = {
+        payeeAgentId: 1n,
+        expectedHandleHash: merchantHandleHash,
+        expectedLegalHash: merchantLegal,
+        expectedPayoutWallet: merchant.address,
+        restrictedBuyer: ethers.ZeroAddress,
+        amount: 200n * ONE_TUSD8,
+        expiresAt: now + 3600n,
+        disputeWindow: 0,
+        mode: SettlementMode.INSTANT,
+        requireAttestation: false,
+        strictNoPendingRotation: false,
+        metadataHash: hashStr("CROSS-ESCROW")
+      };
+      const splits = [{ agentId: 1n, expectedWallet: merchant.address, bps: 10000 }];
+      await escrow.connect(merchant).createInvoice(invParams, splits);
+      await escrow2.connect(merchant).createInvoice(invParams, splits);
+
+      const userSalt = hashStr("SHARED-SALT");
+      const bound1 = await escrow.computeBoundInvoiceSalt(1n, userSalt);
+      const attesterSig = await signCoPReceipt(registry, attester, {
+        agentId: 1n,
+        handleHash: merchantHandleHash,
+        legalEntityHash: merchantLegal,
+        payoutWallet: merchant.address,
+        invoiceSalt: bound1,
+        nonce: 55n,
+        deadline: now + 900n
+      });
+
+      // Valid on registry right now
+      const [validBefore] = await registry.verifySignedCoPReceipt(
+        1n, merchantHandleHash, merchantLegal, merchant.address, bound1, 55n, now + 900n, attester.address, attesterSig
+      );
+      expect(validBefore).to.equal(true);
+
+      // Replaying escrow #1's signed receipt against escrow #2 MUST revert (different bound escrow address!)
+      await expect(
+        escrow2.connect(buyer).payInvoiceWithCoPProof(
+          1n, merchantHandleHash, merchantLegal, merchant.address,
+          attester.address, userSalt, 55n, now + 900n, attesterSig
+        )
+      ).to.be.revertedWithCustomError(escrow2, "InvalidCoPSignature");
+
+      // After revoking agent #1, standalone `registry.verifySignedCoPReceipt` MUST return false even for ATTESTER_ROLE
+      await registry.connect(admin).revokePayee(1n, hashStr("REVOKED_AFTER_SIGN"));
+      const [validAfter] = await registry.verifySignedCoPReceipt(
+        1n, merchantHandleHash, merchantLegal, merchant.address, bound1, 55n, now + 900n, attester.address, attesterSig
+      );
+      expect(validAfter).to.equal(false);
     });
   });
 
@@ -1036,8 +1177,8 @@ describe("PayeeShield — ERC-8004 Confirmation-of-Payee & tUSD8 Invoice Escrow"
       const buyerStart = await tusd8.balanceOf(buyer.address);
       await escrow.connect(buyer).payInvoice(1n, merchantHandleHash, merchantLegal, merchant.address);
 
-      // Cannot emergency-refund before payee is revoked
-      await expect(escrow.connect(buyer).emergencyRefundRevokedPayee(1n)).to.be.revertedWithCustomError(escrow, "PayeeNotRevoked");
+      // Cannot emergency-refund before payee is invalidated or revoked
+      await expect(escrow.connect(buyer).emergencyRefundRevokedPayee(1n)).to.be.revertedWithCustomError(escrow, "PayeeStillValid");
 
       // Guardian revokes compromised merchant and pauses protocol
       await registry.connect(admin).revokePayee(1n, hashStr("POST_FUNDING_BREACH"));
@@ -1149,6 +1290,122 @@ describe("PayeeShield — ERC-8004 Confirmation-of-Payee & tUSD8 Invoice Escrow"
       await escrow.connect(arbiter).resolveDispute(1n, 10000);
       expect(await tusd8.balanceOf(buyer.address)).to.equal(buyerBefore);
       expect((await escrow.getInvoice(1n)).status).to.equal(InvoiceStatus.REFUNDED);
+    });
+
+    it("5.7 prevents stuck funds via emergencyRefundInvalidatedPayee on post-funding wallet rotation, NFT transfer, or split change", async function () {
+      const { tusd8, registry, escrow, admin, merchant, taxVault, buyer, rotatedWallet, attacker, merchantHandleHash, merchantLegal } =
+        await deployFixture();
+      const amount = 1500n * ONE_TUSD8;
+      const now = BigInt(await time.latest());
+
+      // Invoice #1: primary payee completes wallet rotation after funding & after disputeDeadline
+      await escrow.connect(merchant).createInvoice(
+        {
+          payeeAgentId: 1n,
+          expectedHandleHash: merchantHandleHash,
+          expectedLegalHash: merchantLegal,
+          expectedPayoutWallet: merchant.address,
+          restrictedBuyer: ethers.ZeroAddress,
+          amount,
+          expiresAt: now + 3600n,
+          disputeWindow: 1800,
+          mode: SettlementMode.MILESTONE_ESCROW,
+          requireAttestation: false,
+          strictNoPendingRotation: false,
+          metadataHash: hashStr("ESCROW-ROT-STUCK")
+        },
+        [
+          { agentId: 1n, expectedWallet: merchant.address, bps: 8000 },
+          { agentId: 2n, expectedWallet: taxVault.address, bps: 2000 }
+        ]
+      );
+
+      // Invoice #2: secondary split leg (taxVault #2) transfers NFT post-funding
+      await escrow.connect(merchant).createInvoice(
+        {
+          payeeAgentId: 1n,
+          expectedHandleHash: merchantHandleHash,
+          expectedLegalHash: merchantLegal,
+          expectedPayoutWallet: merchant.address,
+          restrictedBuyer: ethers.ZeroAddress,
+          amount,
+          expiresAt: now + 3600n,
+          disputeWindow: 1800,
+          mode: SettlementMode.MILESTONE_ESCROW,
+          requireAttestation: false,
+          strictNoPendingRotation: false,
+          metadataHash: hashStr("ESCROW-SPLIT-STUCK")
+        },
+        [
+          { agentId: 1n, expectedWallet: merchant.address, bps: 8000 },
+          { agentId: 2n, expectedWallet: taxVault.address, bps: 2000 }
+        ]
+      );
+
+      const buyerStart = await tusd8.balanceOf(buyer.address);
+      await escrow.connect(buyer).payInvoice(1n, merchantHandleHash, merchantLegal, merchant.address);
+      await escrow.connect(buyer).payInvoice(2n, merchantHandleHash, merchantLegal, merchant.address);
+
+      // Secondary split leg #2 transfers NFT (resetting its wallet to 0x0) -> invoice #2 immediately refundable!
+      await registry.connect(taxVault).transferFrom(taxVault.address, attacker.address, 2n);
+      await expect(escrow.connect(buyer).releaseEscrow(2n)).to.be.revertedWithCustomError(escrow, "SplitPayeeCheckFailed");
+      await escrow.connect(buyer).emergencyRefundInvalidatedPayee(2n);
+      expect((await escrow.getInvoice(2n)).status).to.equal(InvoiceStatus.REFUNDED);
+
+      // Primary merchant #1 completes wallet rotation + disputeDeadline passes + contract pauses -> still 100% refundable!
+      const rotSig = await signSetAgentWallet(registry, rotatedWallet, 1n, rotatedWallet.address, 0n, now + 7200n);
+      await registry.connect(merchant).setAgentWallet(1n, rotatedWallet.address, now + 7200n, rotSig);
+      await time.increase(COOLDOWN + 100n);
+      await registry.connect(merchant).finalizePayoutWalletRotation(1n);
+      await escrow.connect(admin).pause();
+
+      await escrow.connect(buyer).emergencyRefundInvalidatedPayee(1n);
+      expect(await tusd8.balanceOf(buyer.address)).to.equal(buyerStart);
+      expect(await tusd8.balanceOf(await escrow.getAddress())).to.equal(0n);
+    });
+
+    it("5.8 enforces strictNoPendingRotation on escrow release/resolve and permits openDispute while paused", async function () {
+      const { registry, escrow, admin, arbiter, merchant, buyer, rotatedWallet, merchantHandleHash, merchantLegal } =
+        await deployFixture();
+      const now = BigInt(await time.latest());
+      await escrow.connect(merchant).createInvoice(
+        {
+          payeeAgentId: 1n,
+          expectedHandleHash: merchantHandleHash,
+          expectedLegalHash: merchantLegal,
+          expectedPayoutWallet: merchant.address,
+          restrictedBuyer: ethers.ZeroAddress,
+          amount: 1000n * ONE_TUSD8,
+          expiresAt: now + 3600n,
+          disputeWindow: 7200,
+          mode: SettlementMode.MILESTONE_ESCROW,
+          requireAttestation: false,
+          strictNoPendingRotation: true,
+          metadataHash: hashStr("STRICT-REL-PAUSE")
+        },
+        [{ agentId: 1n, expectedWallet: merchant.address, bps: 10000 }]
+      );
+
+      await escrow.connect(buyer).payInvoice(1n, merchantHandleHash, merchantLegal, merchant.address);
+
+      // Merchant initiates wallet rotation while escrow is funded -> releaseEscrow MUST revert under strictNoPendingRotation
+      const sig = await signSetAgentWallet(registry, rotatedWallet, 1n, rotatedWallet.address, 0n, now + 600n);
+      await registry.connect(merchant).setAgentWallet(1n, rotatedWallet.address, now + 600n, sig);
+      await expect(escrow.connect(buyer).releaseEscrow(1n)).to.be.revertedWithCustomError(escrow, "PayeeRotationPending");
+
+      // Protocol pauses -> buyer MUST STILL be able to call openDispute before disputeDeadline!
+      await escrow.connect(admin).pause();
+      await escrow.connect(buyer).openDispute(1n, hashStr("ROTATION_SUSPICIOUS"));
+      expect((await escrow.getInvoice(1n)).status).to.equal(InvoiceStatus.DISPUTED);
+
+      // Arbiter partial payout to rotating merchant also reverts under strictNoPendingRotation until rotation cancelled
+      await expect(escrow.connect(arbiter).resolveDispute(1n, 5000)).to.be.revertedWithCustomError(
+        escrow,
+        "PayeeRotationPending"
+      );
+      await registry.connect(admin).cancelPayoutWalletRotation(1n);
+      await escrow.connect(arbiter).resolveDispute(1n, 5000);
+      expect((await escrow.getInvoice(1n)).status).to.equal(InvoiceStatus.SETTLED);
     });
   });
 
@@ -1370,6 +1627,33 @@ describe("PayeeShield — ERC-8004 Confirmation-of-Payee & tUSD8 Invoice Escrow"
       expect(await evilToken.reentrySucceeded()).to.equal(false);
       expect(await evilToken.balanceOf(buyer.address)).to.equal(5000n * ONE_TUSD8);
       expect(await evilToken.balanceOf(await escrow.getAddress())).to.equal(0n);
+    });
+
+    it("6.5 rejects zero expectedHandleHash or expectedLegalHash on createInvoice (InvalidCoPHash)", async function () {
+      const { escrow, merchant, merchantHandleHash, merchantLegal } = await deployFixture();
+      const base = {
+        payeeAgentId: 1n,
+        expectedHandleHash: ethers.ZeroHash,
+        expectedLegalHash: merchantLegal,
+        expectedPayoutWallet: merchant.address,
+        restrictedBuyer: ethers.ZeroAddress,
+        amount: 100n * ONE_TUSD8,
+        expiresAt: BigInt(await time.latest()) + 3600n,
+        disputeWindow: 0,
+        mode: SettlementMode.INSTANT,
+        requireAttestation: false,
+        strictNoPendingRotation: false,
+        metadataHash: hashStr("ZERO-HASH")
+      };
+      const splits = [{ agentId: 1n, expectedWallet: merchant.address, bps: 10000 }];
+
+      await expect(escrow.connect(merchant).createInvoice(base, splits)).to.be.revertedWithCustomError(
+        escrow,
+        "InvalidCoPHash"
+      );
+      await expect(
+        escrow.connect(merchant).createInvoice({ ...base, expectedHandleHash: merchantHandleHash, expectedLegalHash: ethers.ZeroHash }, splits)
+      ).to.be.revertedWithCustomError(escrow, "InvalidCoPHash");
     });
   });
 });

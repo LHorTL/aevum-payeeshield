@@ -19,9 +19,12 @@ import {IERC8004PayeeRegistry} from "./interfaces/IERC8004PayeeRegistry.sol";
  *         - Supports both Instant CoP Settlement and Milestone Escrow with buyer dispute window.
  *         - Multi-recipient BPS splits (sum == 10,000, dust-free remainder allocation, every
  *           split recipient bound to an active non-revoked ERC-8004 payee identity).
- *         - Optional EIP-712 signed CoP verification receipt with one-time replay protection.
- *         - Automatic buyer emergency refund if a funded payee is revoked before release.
- *         - Deterministic on-chain cryptographic settlement receipts (`receiptHash`).
+ *         - Optional EIP-712 signed CoP verification receipt bound to `(address(this), invoiceId, salt)`
+ *           with one-time replay protection.
+ *         - Zero-stuck-funds buyer emergency refund if a funded primary payee OR any split leg is
+ *           revoked, rotated to another wallet, transferred, or changes profile post-funding
+ *           (callable even while paused and even after `disputeDeadline`).
+ *         - `openDispute` intentionally callable even while paused so buyers can never be timed out.
  */
 contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
     using SafeERC20 for IERC20;
@@ -147,7 +150,7 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
         uint256 payeeDistributedAmount,
         bytes32 receiptHash
     );
-    event EmergencyRefundIssued(uint256 indexed invoiceId, address indexed payer, uint256 amount, uint256 revokedAgentId);
+    event EmergencyRefundIssued(uint256 indexed invoiceId, address indexed payer, uint256 amount, uint256 invalidatedAgentId);
     event InvoiceCancelled(uint256 indexed invoiceId, address indexed cancelledBy);
     event InvoiceExpiredEvent(uint256 indexed invoiceId);
 
@@ -156,6 +159,7 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
     error InvalidAmount();
     error InvalidExpiry();
     error InvalidDisputeWindow();
+    error InvalidCoPHash();
     error InvalidSplits();
     error SplitBpsSumMismatch(uint256 actualSum);
     error UnauthorizedIssuer();
@@ -176,7 +180,7 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
     error DisputeWindowActive(uint64 deadline);
     error DisputeWindowClosed(uint64 deadline);
     error InvalidRefundBps(uint16 bps);
-    error PayeeNotRevoked();
+    error PayeeStillValid();
     error InvoiceNotExpiredYet(uint64 expiresAt);
 
     constructor(address _paymentToken, address _payeeRegistry, address admin, address arbiter) {
@@ -203,6 +207,9 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
         if (params.amount == 0) revert InvalidAmount();
         if (params.expiresAt <= block.timestamp) revert InvalidExpiry();
         if (params.expectedPayoutWallet == address(0)) revert ZeroAddress();
+        if (params.expectedHandleHash == bytes32(0) || params.expectedLegalHash == bytes32(0)) {
+            revert InvalidCoPHash();
+        }
         if (params.disputeWindow > MAX_DISPUTE_WINDOW) revert InvalidDisputeWindow();
         if (params.mode == SettlementMode.MILESTONE_ESCROW && params.disputeWindow == 0) {
             revert InvalidDisputeWindow();
@@ -296,8 +303,17 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
     }
 
     /**
+     * @notice Helper returning the domain-bound `invoiceSalt` signed in `payInvoiceWithCoPProof`
+     *         so receipts cannot be replayed across different escrows or invoices.
+     */
+    function computeBoundInvoiceSalt(uint256 invoiceId, bytes32 userSalt) public view returns (bytes32) {
+        return keccak256(abi.encode(address(this), invoiceId, userSalt));
+    }
+
+    /**
      * @notice Pays or funds an invoice with an additional EIP-712 signed CoP verification receipt.
-     * @dev    Protects against signature spoofing and replays via one-time `usedCoPReceipts[digest]`.
+     * @dev    Binds `invoiceSalt` to `(address(this), invoiceId, userSalt)` to eliminate cross-escrow
+     *         and cross-invoice replay, AND burns each digest in `usedCoPReceipts[digest]`.
      */
     function payInvoiceWithCoPProof(
         uint256 invoiceId,
@@ -305,19 +321,20 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
         bytes32 buyerExpectedLegalHash,
         address buyerExpectedWallet,
         address receiptSigner,
-        bytes32 invoiceSalt,
+        bytes32 userSalt,
         uint256 nonce,
         uint256 deadline,
         bytes calldata signature
     ) external nonReentrant whenNotPaused returns (bytes32 receiptHash) {
         Invoice storage inv = _requireInvoice(invoiceId);
+        bytes32 boundSalt = computeBoundInvoiceSalt(invoiceId, userSalt);
 
         (bool valid, bytes32 digest) = payeeRegistry.verifySignedCoPReceipt(
             inv.payeeAgentId,
             buyerExpectedHandleHash,
             buyerExpectedLegalHash,
             buyerExpectedWallet,
-            invoiceSalt,
+            boundSalt,
             nonce,
             deadline,
             receiptSigner,
@@ -331,7 +348,7 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
     }
 
     // =========================================================================
-    // Milestone Escrow Release, Disputes & Emergency Revocation Refund
+    // Milestone Escrow Release, Disputes & Zero-Stuck-Funds Emergency Exit
     // =========================================================================
 
     /**
@@ -358,8 +375,10 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
 
     /**
      * @notice Buyer freezes an active escrow within the dispute window.
+     * @dev    Intentionally NOT gated by `whenNotPaused` (moves 0 tokens) so a protocol pause
+     *         spanning `disputeDeadline` can never lock buyers out of disputing an escrow.
      */
-    function openDispute(uint256 invoiceId, bytes32 reasonHash) external whenNotPaused {
+    function openDispute(uint256 invoiceId, bytes32 reasonHash) external {
         Invoice storage inv = _requireInvoice(invoiceId);
         if (inv.status != InvoiceStatus.FUNDED) revert InvalidStatus(InvoiceStatus.FUNDED, inv.status);
         if (msg.sender != inv.payer) revert UnauthorizedCaller();
@@ -383,13 +402,14 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
         uint256 payeePortion = inv.amount - buyerRefund;
 
         if (payeePortion > 0) {
+            // Re-verify live CoP + strict rotation lock; KYB expiry post-funding does not trap earned payouts
             _enforcePrimaryCoP(
                 inv.payeeAgentId,
                 inv.expectedHandleHash,
                 inv.expectedLegalHash,
                 inv.expectedPayoutWallet,
                 false,
-                false
+                inv.strictNoPendingRotation
             );
             _enforceSplitRecipients(invoiceId);
         }
@@ -411,25 +431,20 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
     }
 
     /**
-     * @notice Buyer safety valve: if the primary payee OR any split recipient is revoked in the
-     *         ERC-8004 registry after escrow funding, buyer can immediately reclaim 100% of escrowed tUSD8.
-     * @dev    Intentionally callable even while paused so buyers are never trapped with a compromised payee.
+     * @notice Zero-stuck-funds buyer safety valve: if the primary payee OR any split recipient is
+     *         revoked, rotates away from the locked wallet, transfers their ERC-8004 NFT, or alters
+     *         handle/legal identity post-funding, buyer can immediately reclaim 100% of escrowed tUSD8.
+     * @dev    Intentionally callable even while paused AND even after `disputeDeadline`.
+     */
+    function emergencyRefundInvalidatedPayee(uint256 invoiceId) external nonReentrant {
+        _executeEmergencyRefund(invoiceId);
+    }
+
+    /**
+     * @notice Backwards-compatible alias for `emergencyRefundInvalidatedPayee`.
      */
     function emergencyRefundRevokedPayee(uint256 invoiceId) external nonReentrant {
-        Invoice storage inv = _requireInvoice(invoiceId);
-        if (inv.status != InvoiceStatus.FUNDED && inv.status != InvoiceStatus.DISPUTED) {
-            revert InvalidStatus(InvoiceStatus.FUNDED, inv.status);
-        }
-        if (msg.sender != inv.payer) revert UnauthorizedCaller();
-
-        uint256 revokedAgentId = _findRevokedAgent(inv);
-        if (revokedAgentId == 0) revert PayeeNotRevoked();
-
-        inv.status = InvoiceStatus.REFUNDED;
-        inv.receiptHash = _computeReceiptHash(inv, 0, InvoiceStatus.REFUNDED);
-
-        paymentToken.safeTransfer(inv.payer, inv.amount);
-        emit EmergencyRefundIssued(invoiceId, inv.payer, inv.amount, revokedAgentId);
+        _executeEmergencyRefund(invoiceId);
     }
 
     function cancelInvoice(uint256 invoiceId) external whenNotPaused {
@@ -605,14 +620,16 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
     }
 
     function _settleFundedEscrow(Invoice storage inv) internal {
-        // Re-verify live CoP at release time so compromised/revoked payees cannot withdraw
+        // Re-verify live CoP + strict rotation lock at release time so compromised/rotating payees cannot withdraw.
+        // Note: `requireAttestation` is intentionally NOT re-enforced post-funding so routine KYB certificate
+        // expiration mid-milestone cannot strand an otherwise valid, unrevoked merchant's earned escrow.
         _enforcePrimaryCoP(
             inv.payeeAgentId,
             inv.expectedHandleHash,
             inv.expectedLegalHash,
             inv.expectedPayoutWallet,
             false,
-            false
+            inv.strictNoPendingRotation
         );
         _enforceSplitRecipients(inv.id);
 
@@ -622,6 +639,23 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
 
         _distributeFromSelf(inv.id, inv.amount);
         emit InvoiceSettled(inv.id, inv.payer, inv.payeeAgentId, inv.amount, receiptHash);
+    }
+
+    function _executeEmergencyRefund(uint256 invoiceId) internal {
+        Invoice storage inv = _requireInvoice(invoiceId);
+        if (inv.status != InvoiceStatus.FUNDED && inv.status != InvoiceStatus.DISPUTED) {
+            revert InvalidStatus(InvoiceStatus.FUNDED, inv.status);
+        }
+        if (msg.sender != inv.payer) revert UnauthorizedCaller();
+
+        uint256 invalidatedAgentId = _findInvalidatedAgent(inv);
+        if (invalidatedAgentId == 0) revert PayeeStillValid();
+
+        inv.status = InvoiceStatus.REFUNDED;
+        inv.receiptHash = _computeReceiptHash(inv, 0, InvoiceStatus.REFUNDED);
+
+        paymentToken.safeTransfer(inv.payer, inv.amount);
+        emit EmergencyRefundIssued(invoiceId, inv.payer, inv.amount, invalidatedAgentId);
     }
 
     function _enforcePrimaryCoP(
@@ -685,14 +719,34 @@ contract PayeeShieldInvoiceEscrow is ReentrancyGuard, Pausable, AccessControl {
         }
     }
 
-    function _findRevokedAgent(Invoice storage inv) internal view returns (uint256) {
-        if (payeeRegistry.isPayeeRevoked(inv.payeeAgentId)) {
+    /**
+     * @dev Returns a non-zero `agentId` if the primary payee OR any split recipient is permanently
+     *      invalidated for this escrow (revoked, rotated away from locked wallet, transferred NFT,
+     *      or changed handle/legal profile), ensuring escrowed funds can never become permanently stuck.
+     */
+    function _findInvalidatedAgent(Invoice storage inv) internal view returns (uint256) {
+        IERC8004PayeeRegistry.CoPResult memory primaryCoP = payeeRegistry.verifyPayee(
+            inv.payeeAgentId,
+            inv.expectedHandleHash,
+            inv.expectedLegalHash,
+            inv.expectedPayoutWallet
+        );
+        if (
+            primaryCoP.status != IERC8004PayeeRegistry.CoPStatus.EXACT_MATCH
+                && primaryCoP.status != IERC8004PayeeRegistry.CoPStatus.WALLET_ROTATION_PENDING
+        ) {
             return inv.payeeAgentId;
         }
+
         SplitRecipient[] storage splits = _invoiceSplits[inv.id];
         for (uint256 i = 0; i < splits.length; i++) {
-            if (payeeRegistry.isPayeeRevoked(splits[i].agentId)) {
-                return splits[i].agentId;
+            SplitRecipient storage s = splits[i];
+            if (payeeRegistry.isPayeeRevoked(s.agentId)) {
+                return s.agentId;
+            }
+            address activeWallet = payeeRegistry.getAgentWallet(s.agentId);
+            if (activeWallet == address(0) || activeWallet != s.expectedWallet) {
+                return s.agentId;
             }
         }
         return 0;

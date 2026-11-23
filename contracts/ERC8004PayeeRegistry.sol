@@ -5,6 +5,7 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC721URIStorage} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
@@ -15,12 +16,20 @@ import {IERC8004PayeeRegistry} from "./interfaces/IERC8004PayeeRegistry.sol";
  * @notice Full ERC-8004 ("Trustless Agents") Identity Registry with built-in
  *         Confirmation-of-Payee (CoP) verification, ASCII homoglyph-resistant handle
  *         normalization, timelocked payout wallet rotation, emergency revocation,
- *         KYB/compliance attestations, and EIP-712 signed verification receipts.
- * @dev    Designed for QDay Aevum Testnet (Chain ID 44005). Compliant with ERC-8004
- *         ERC-721 identity semantics, reserved `agentWallet` metadata guard, EIP-712/ERC-1271
- *         wallet-control verification, and automatic `agentWallet` reset upon NFT transfer.
+ *         epoch-bound KYB/compliance attestations, and EIP-712 signed verification receipts.
+ * @dev    Designed for QDay Aevum Testnet (Chain ID 44005, Shanghai EVM target).
+ *         Enforces strict CEI + ReentrancyGuard around `_safeMint`, automatic `agentWallet`
+ *         reset + `profileEpoch` & `walletNonces` invalidation on NFT transfer or profile change,
+ *         and bounded attestation storage (`MAX_ATTESTATIONS_PER_AGENT = 64`).
  */
-contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausable, IERC8004PayeeRegistry {
+contract ERC8004PayeeRegistry is
+    ERC721URIStorage,
+    EIP712,
+    AccessControl,
+    Pausable,
+    ReentrancyGuard,
+    IERC8004PayeeRegistry
+{
     bytes32 public constant ATTESTER_ROLE = keccak256("ATTESTER_ROLE");
     bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
 
@@ -37,6 +46,7 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
     );
 
     uint64 public constant MAX_ROTATION_COOLDOWN = 7 days;
+    uint256 public constant MAX_ATTESTATIONS_PER_AGENT = 64;
 
     uint256 private _nextAgentId = 1;
     uint64 public rotationCooldown;
@@ -50,6 +60,7 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
         uint64 rotationExecutableAt;
         uint64 registeredAt;
         uint64 updatedAt;
+        uint64 profileEpoch;
         bool revoked;
         bytes32 revocationReasonHash;
     }
@@ -78,6 +89,7 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
     error RotationCooldownActive(uint64 executableAt);
     error CooldownTooLong(uint64 provided);
     error InvalidAttestationExpiry();
+    error MaxAttestationsReached(uint256 agentId);
     error AttestationNotFound(bytes32 attestationId);
     error AttestationAlreadyRevoked(bytes32 attestationId);
 
@@ -95,22 +107,25 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
     }
 
     // =========================================================================
-    // Standard ERC-8004 Identity Registry Interface
+    // Standard ERC-8004 Identity Registry Interface (Strict CEI + nonReentrant)
     // =========================================================================
 
     /// @inheritdoc IERC8004PayeeRegistry
-    function register(string calldata agentURI) external whenNotPaused returns (uint256 agentId) {
-        agentId = _mintIdentity(msg.sender, agentURI);
+    function register(string calldata agentURI) external whenNotPaused nonReentrant returns (uint256 agentId) {
+        agentId = _allocateAndWriteProfile(msg.sender, "", bytes32(0), bytes32(0));
+        _finalizeMintAndURI(msg.sender, agentId, agentURI);
     }
 
     /// @inheritdoc IERC8004PayeeRegistry
     function register(string calldata agentURI, MetadataEntry[] calldata metadata)
         external
         whenNotPaused
+        nonReentrant
         returns (uint256 agentId)
     {
-        agentId = _mintIdentity(msg.sender, agentURI);
+        agentId = _allocateAndWriteProfile(msg.sender, "", bytes32(0), bytes32(0));
         _writeMetadataBatch(agentId, metadata);
+        _finalizeMintAndURI(msg.sender, agentId, agentURI);
     }
 
     /// @inheritdoc IERC8004PayeeRegistry
@@ -119,27 +134,25 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
         bytes32 legalEntityHash,
         string calldata agentURI,
         MetadataEntry[] calldata metadata
-    ) external whenNotPaused returns (uint256 agentId) {
+    ) external whenNotPaused nonReentrant returns (uint256 agentId) {
         if (legalEntityHash == bytes32(0)) revert InvalidLegalEntityHash();
         (string memory normalized, bytes32 handleHash) = normalizeHandle(handle);
         if (_handleHashToAgentId[handleHash] != 0) revert HandleAlreadyRegistered(handleHash);
 
-        agentId = _mintIdentity(msg.sender, agentURI);
-
-        InternalProfile storage p = _profiles[agentId];
-        p.handle = normalized;
-        p.handleHash = handleHash;
-        p.legalEntityHash = legalEntityHash;
-        p.updatedAt = uint64(block.timestamp);
-
+        // CEI: write ALL profile, handle uniqueness, and metadata state BEFORE `_safeMint` callback
+        agentId = _allocateAndWriteProfile(msg.sender, normalized, handleHash, legalEntityHash);
         _handleHashToAgentId[handleHash] = agentId;
         _writeMetadataBatch(agentId, metadata);
 
-        emit PayeeProfileBound(agentId, handleHash, normalized, legalEntityHash, msg.sender);
+        emit PayeeProfileBound(agentId, handleHash, normalized, legalEntityHash, msg.sender, 1);
+
+        _finalizeMintAndURI(msg.sender, agentId, agentURI);
     }
 
     /**
-     * @notice Binds a merchant handle and legal entity hash to an existing bare ERC-8004 agentId.
+     * @notice Binds or updates a merchant handle and legal entity hash on an ERC-8004 agentId.
+     * @dev    If the identity already had a bound handle or legal entity hash, bumps `profileEpoch`
+     *         so all prior KYB attestations issued under the old entity identity are invalidated.
      */
     function bindPayeeProfile(uint256 agentId, string calldata handle, bytes32 legalEntityHash) external whenNotPaused {
         _requireActiveController(agentId);
@@ -151,8 +164,15 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
         uint256 existing = _handleHashToAgentId[handleHash];
         if (existing != 0 && existing != agentId) revert HandleAlreadyRegistered(handleHash);
 
+        bool wasBound = (p.handleHash != bytes32(0) || p.legalEntityHash != bytes32(0));
+        bool identityChanged = (p.handleHash != handleHash || p.legalEntityHash != legalEntityHash);
+
         if (p.handleHash != bytes32(0) && p.handleHash != handleHash) {
             delete _handleHashToAgentId[p.handleHash];
+        }
+
+        if (wasBound && identityChanged) {
+            p.profileEpoch += 1;
         }
 
         p.handle = normalized;
@@ -161,7 +181,7 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
         p.updatedAt = uint64(block.timestamp);
         _handleHashToAgentId[handleHash] = agentId;
 
-        emit PayeeProfileBound(agentId, handleHash, normalized, legalEntityHash, p.payoutWallet);
+        emit PayeeProfileBound(agentId, handleHash, normalized, legalEntityHash, p.payoutWallet, p.profileEpoch);
     }
 
     /// @inheritdoc IERC8004PayeeRegistry
@@ -283,7 +303,7 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
     }
 
     // =========================================================================
-    // Revocation & KYB / Compliance Attestations
+    // Revocation & Epoch-Bound KYB / Compliance Attestations
     // =========================================================================
 
     /// @inheritdoc IERC8004PayeeRegistry
@@ -298,8 +318,10 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
         address prevWallet = p.payoutWallet;
         p.revoked = true;
         p.revocationReasonHash = reasonHash;
+        p.payoutWallet = address(0);
         p.pendingPayoutWallet = address(0);
         p.rotationExecutableAt = 0;
+        p.profileEpoch += 1;
         p.updatedAt = uint64(block.timestamp);
 
         emit PayeeRevokedEvent(agentId, msg.sender, reasonHash);
@@ -309,7 +331,7 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
     }
 
     /**
-     * @notice Issues a verifiable KYB / merchant compliance attestation for an active payee.
+     * @notice Issues a verifiable KYB / merchant compliance attestation bound to the agent's current `profileEpoch`.
      */
     function issueAttestation(uint256 agentId, bytes32 schemaId, bytes32 evidenceHash, uint64 expiresAt)
         external
@@ -318,11 +340,16 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
         returns (bytes32 attestationId)
     {
         _requireExists(agentId);
-        if (_profiles[agentId].revoked) revert PayeeAlreadyRevoked(agentId);
+        InternalProfile storage p = _profiles[agentId];
+        if (p.revoked) revert PayeeAlreadyRevoked(agentId);
         if (expiresAt != 0 && expiresAt <= block.timestamp) revert InvalidAttestationExpiry();
+        if (_agentAttestationIds[agentId].length >= MAX_ATTESTATIONS_PER_AGENT) {
+            revert MaxAttestationsReached(agentId);
+        }
 
+        uint64 epoch = p.profileEpoch;
         attestationId = keccak256(
-            abi.encodePacked(agentId, msg.sender, schemaId, evidenceHash, block.timestamp, _agentAttestationIds[agentId].length)
+            abi.encodePacked(agentId, msg.sender, schemaId, evidenceHash, epoch, block.timestamp, _agentAttestationIds[agentId].length)
         );
         _attestations[agentId][attestationId] = Attestation({
             attestationId: attestationId,
@@ -331,11 +358,12 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
             evidenceHash: evidenceHash,
             issuedAt: uint64(block.timestamp),
             expiresAt: expiresAt,
+            profileEpoch: epoch,
             revoked: false
         });
         _agentAttestationIds[agentId].push(attestationId);
 
-        emit AttestationIssued(agentId, attestationId, msg.sender, schemaId, evidenceHash, expiresAt);
+        emit AttestationIssued(agentId, attestationId, msg.sender, schemaId, evidenceHash, expiresAt, epoch);
     }
 
     /**
@@ -363,7 +391,7 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
 
     /// @inheritdoc IERC8004PayeeRegistry
     function hasValidAttestation(uint256 agentId) public view returns (bool) {
-        return _countActiveAttestations(agentId) > 0;
+        return _hasActiveAttestation(agentId);
     }
 
     // =========================================================================
@@ -384,7 +412,7 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
 
         InternalProfile storage p = _profiles[agentId];
         bool pendingRot = p.pendingPayoutWallet != address(0);
-        bool attested = _countActiveAttestations(agentId) > 0;
+        bool attested = _hasActiveAttestation(agentId);
 
         result.resolvedAgentId = agentId;
         result.activePayoutWallet = p.revoked ? address(0) : p.payoutWallet;
@@ -443,7 +471,11 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
         return verifyPayee(agentId, handleHash, expectedLegalHash, expectedWallet);
     }
 
-    /// @inheritdoc IERC8004PayeeRegistry
+    /**
+     * @inheritdoc IERC8004PayeeRegistry
+     * @dev Enforces live payee activity, non-revocation, handle/legal/wallet match, AND
+     *      valid EIP-712 / ERC-1271 signature from an authorized attester or active payout wallet.
+     */
     function verifySignedCoPReceipt(
         uint256 agentId,
         bytes32 handleHash,
@@ -455,13 +487,27 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
         address expectedSigner,
         bytes calldata signature
     ) external view returns (bool valid, bytes32 digest) {
-        if (expectedSigner == address(0) || block.timestamp > deadline) {
+        if (expectedSigner == address(0) || payoutWallet == address(0) || block.timestamp > deadline) {
+            return (false, bytes32(0));
+        }
+
+        // Enforce live payee registry state (safe for standalone integrators too!)
+        if (_ownerOf(agentId) == address(0)) {
+            return (false, bytes32(0));
+        }
+        InternalProfile storage p = _profiles[agentId];
+        if (p.revoked || p.payoutWallet == address(0) || p.payoutWallet != payoutWallet) {
+            return (false, bytes32(0));
+        }
+        if (handleHash != bytes32(0) && p.handleHash != handleHash) {
+            return (false, bytes32(0));
+        }
+        if (legalEntityHash != bytes32(0) && p.legalEntityHash != legalEntityHash) {
             return (false, bytes32(0));
         }
 
         // Signer must be an authorized KYB attester OR the active verified payout wallet itself.
-        bool signerAllowed = hasRole(ATTESTER_ROLE, expectedSigner)
-            || (payoutWallet != address(0) && expectedSigner == getAgentWallet(agentId) && expectedSigner == payoutWallet);
+        bool signerAllowed = hasRole(ATTESTER_ROLE, expectedSigner) || expectedSigner == p.payoutWallet;
         if (!signerAllowed) {
             return (false, bytes32(0));
         }
@@ -505,7 +551,6 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
 
         for (uint256 i = 0; i < len; i++) {
             bytes1 b = src[i];
-            // Uppercase A-Z -> lowercase a-z
             if (b >= 0x41 && b <= 0x5A) {
                 b = bytes1(uint8(b) + 32);
             }
@@ -556,6 +601,7 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
             rotationExecutableAt: p.rotationExecutableAt,
             registeredAt: p.registeredAt,
             updatedAt: p.updatedAt,
+            profileEpoch: p.profileEpoch,
             revoked: p.revoked,
             activeAttestations: _countActiveAttestations(agentId)
         });
@@ -608,20 +654,32 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
     // Internal ERC-721 Transfer-Safety Hook & Helpers
     // =========================================================================
 
-    function _mintIdentity(address owner, string calldata agentURI) internal returns (uint256 agentId) {
+    function _allocateAndWriteProfile(
+        address owner,
+        string memory normalizedHandle,
+        bytes32 handleHash,
+        bytes32 legalEntityHash
+    ) internal returns (uint256 agentId) {
         agentId = _nextAgentId++;
-        _safeMint(owner, agentId);
-        if (bytes(agentURI).length > 0) {
-            _setTokenURI(agentId, agentURI);
-        }
-
         InternalProfile storage p = _profiles[agentId];
+        p.handle = normalizedHandle;
+        p.handleHash = handleHash;
+        p.legalEntityHash = legalEntityHash;
         p.payoutWallet = owner;
         p.registeredAt = uint64(block.timestamp);
         p.updatedAt = uint64(block.timestamp);
+        p.profileEpoch = 1;
+    }
 
+    function _finalizeMintAndURI(address owner, uint256 agentId, string calldata agentURI) internal {
+        if (bytes(agentURI).length > 0) {
+            _setTokenURI(agentId, agentURI);
+        }
         emit AgentRegistered(agentId, owner, agentURI);
         emit AgentWalletUpdated(agentId, address(0), owner);
+
+        // External `onERC721Received` interaction happens strictly LAST (CEI)
+        _safeMint(owner, agentId);
     }
 
     function _writeMetadataBatch(uint256 agentId, MetadataEntry[] calldata metadata) internal {
@@ -635,8 +693,9 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
 
     /**
      * @dev ERC-8004 Transfer Safety: transferring an agent identity NFT automatically clears
-     *      its active `payoutWallet` and any pending rotation so prior wallets can never hijack
-     *      future payments; the new owner must re-bind via EIP-712 `setAgentWallet`.
+     *      its active `payoutWallet` and any pending rotation, invalidates prior KYB attestations
+     *      via `profileEpoch++`, and invalidates pre-transfer `setAgentWallet` signatures via
+     *      `walletNonces[tokenId]++`.
      */
     function _update(address to, uint256 tokenId, address auth) internal override returns (address from) {
         from = super._update(to, tokenId, auth);
@@ -646,18 +705,43 @@ contract ERC8004PayeeRegistry is ERC721URIStorage, EIP712, AccessControl, Pausab
             p.payoutWallet = address(0);
             p.pendingPayoutWallet = address(0);
             p.rotationExecutableAt = 0;
+            p.profileEpoch += 1;
             p.updatedAt = uint64(block.timestamp);
+            walletNonces[tokenId] += 1;
             if (prevWallet != address(0)) {
                 emit AgentWalletUpdated(tokenId, prevWallet, address(0));
             }
         }
     }
 
-    function _countActiveAttestations(uint256 agentId) internal view returns (uint32 count) {
+    function _hasActiveAttestation(uint256 agentId) internal view returns (bool) {
+        InternalProfile storage p = _profiles[agentId];
+        if (p.revoked) return false;
+        uint64 currentEpoch = p.profileEpoch;
         bytes32[] storage ids = _agentAttestationIds[agentId];
         for (uint256 i = 0; i < ids.length; i++) {
             Attestation storage att = _attestations[agentId][ids[i]];
-            if (!att.revoked && (att.expiresAt == 0 || att.expiresAt > block.timestamp)) {
+            if (
+                !att.revoked && att.profileEpoch == currentEpoch
+                    && (att.expiresAt == 0 || att.expiresAt > block.timestamp)
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _countActiveAttestations(uint256 agentId) internal view returns (uint32 count) {
+        InternalProfile storage p = _profiles[agentId];
+        if (p.revoked) return 0;
+        uint64 currentEpoch = p.profileEpoch;
+        bytes32[] storage ids = _agentAttestationIds[agentId];
+        for (uint256 i = 0; i < ids.length; i++) {
+            Attestation storage att = _attestations[agentId][ids[i]];
+            if (
+                !att.revoked && att.profileEpoch == currentEpoch
+                    && (att.expiresAt == 0 || att.expiresAt > block.timestamp)
+            ) {
                 count++;
             }
         }

@@ -36,7 +36,7 @@ export const REGISTRY_ABI = [
   "function totalAgents() view returns (uint256)",
   "function rotationCooldown() view returns (uint64)",
   "function registerPayee(string handle, bytes32 legalEntityHash, string agentURI, (string metadataKey, bytes metadataValue)[] metadata) returns (uint256)",
-  "function getPayeeProfile(uint256 agentId) view returns ((uint256 agentId, string handle, bytes32 handleHash, bytes32 legalEntityHash, address payoutWallet, address pendingPayoutWallet, uint64 rotationExecutableAt, uint64 registeredAt, uint64 updatedAt, bool revoked, uint32 activeAttestations))",
+  "function getPayeeProfile(uint256 agentId) view returns ((uint256 agentId, string handle, bytes32 handleHash, bytes32 legalEntityHash, address payoutWallet, address pendingPayoutWallet, uint64 rotationExecutableAt, uint64 registeredAt, uint64 updatedAt, uint64 profileEpoch, bool revoked, uint32 activeAttestations))",
   "function verifyPayeeByHandle(string handle, bytes32 expectedLegalHash, address expectedWallet) view returns ((uint8 status, uint256 resolvedAgentId, address activePayoutWallet, bytes32 activeHandleHash, bytes32 activeLegalHash, bool hasPendingRotation, bool isAttested))",
   "function verifyPayee(uint256 agentId, bytes32 expectedHandleHash, bytes32 expectedLegalHash, address expectedWallet) view returns ((uint8 status, uint256 resolvedAgentId, address activePayoutWallet, bytes32 activeHandleHash, bytes32 activeLegalHash, bool hasPendingRotation, bool isAttested))",
   "function revokePayee(uint256 agentId, bytes32 reasonHash)",
@@ -53,7 +53,9 @@ export const ESCROW_ABI = [
   "function finalizeEscrow(uint256 invoiceId)",
   "function openDispute(uint256 invoiceId, bytes32 reasonHash)",
   "function resolveDispute(uint256 invoiceId, uint16 buyerRefundBps)",
+  "function emergencyRefundInvalidatedPayee(uint256 invoiceId)",
   "function emergencyRefundRevokedPayee(uint256 invoiceId)",
+  "function computeBoundInvoiceSalt(uint256 invoiceId, bytes32 userSalt) view returns (bytes32)",
   "function cancelInvoice(uint256 invoiceId)",
   "function getInvoice(uint256 invoiceId) view returns ((uint256 id, address issuer, uint256 payeeAgentId, bytes32 expectedHandleHash, bytes32 expectedLegalHash, address expectedPayoutWallet, address restrictedBuyer, address payer, uint256 amount, uint64 createdAt, uint64 expiresAt, uint64 disputeWindow, uint64 disputeDeadline, uint8 mode, uint8 status, bool requireAttestation, bool strictNoPendingRotation, bytes32 metadataHash, bytes32 receiptHash, bytes32 disputeReasonHash))",
   "function getInvoiceSplits(uint256 invoiceId) view returns ((uint256 agentId, address expectedWallet, uint16 bps)[])"
