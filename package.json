@@ -1,0 +1,28 @@
+{
+  "name": "aevum-payeeshield",
+  "version": "1.0.0",
+  "description": "PayeeShield — ERC-8004 Confirmation-of-Payee & tUSD8 Merchant Invoice Escrow on QDay Aevum Testnet (Chain ID 44005)",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:verbose": "hardhat test --show-stack-traces",
+    "wallet:new": "node scripts/generate-deployer.mjs",
+    "deploy:local": "hardhat run scripts/deploy-hardhat.js",
+    "deploy:aevum": "node scripts/deploy.mjs",
+    "verify:aevum": "node scripts/verify-blockscout.mjs",
+    "web:install": "npm install --prefix web --no-save",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "e2e": "python scripts/e2e_smoke.py"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.18"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.1.0",
+    "dotenv": "^16.4.7",
+    "ethers": "^6.13.5"
+  }
+}

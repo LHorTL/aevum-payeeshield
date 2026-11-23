@@ -1,0 +1,30 @@
+# Dependencies & builds
+node_modules/
+web/node_modules/
+web/dist/
+
+# Hardhat build & test artifacts
+artifacts/
+cache/
+typechain-types/
+coverage/
+coverage.json
+
+# Secrets & local deployer keys (NEVER commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*private*key*
+deployer-keystore.json
+
+# Runtime caches, logs & screenshots
+tmp/
+output/
+storage/
+*.log
+playwright-report/
+test-results/
+.DS_Store
+Thumbs.db
