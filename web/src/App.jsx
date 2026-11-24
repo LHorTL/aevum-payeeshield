@@ -7,7 +7,6 @@ import {
   FileText,
   Users,
   Wallet,
-  Sparkles,
   AlertTriangle,
   CheckCircle2,
   XCircle,
@@ -811,13 +810,11 @@ export default function App() {
       {/* Top Bar */}
       <header className="topbar">
         <div className="brand">
-          <div className="brand-icon" aria-hidden="true">
-            <ShieldCheck size={22} />
-          </div>
+          <div className="brand-accent-bar" aria-hidden="true" />
           <div>
             <h1 className="brand-title">
               PayeeShield
-              <span className="badge badge-cyan mono">ERC-8004 × tUSD8</span>
+              <span className="badge badge-accent mono">ERC-8004 × tUSD8</span>
             </h1>
             <p className="brand-sub">
               On-Chain Confirmation-of-Payee &amp; Multi-Split Merchant Escrow · QDay Aevum Testnet (Chain ID 44005)
@@ -832,7 +829,7 @@ export default function App() {
               className={`mode-btn ${mode === "sim" ? "active-sim" : ""}`}
               onClick={() => setMode("sim")}
             >
-              <Sparkles size={14} /> Interactive Simulation
+              Interactive Simulation
             </button>
             <button
               type="button"
@@ -848,7 +845,7 @@ export default function App() {
               <RefreshCw size={14} /> Reset Demo
             </button>
           ) : (
-            <button type="button" className="btn btn-cyan btn-sm" onClick={wallet.connect} disabled={wallet.connecting}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={wallet.connect} disabled={wallet.connecting}>
               <Wallet size={14} />
               {wallet.account
                 ? `${shortAddr(wallet.account)} ${wallet.isOnAevum ? "✓ 44005" : "Switch 44005"}`
@@ -875,27 +872,25 @@ export default function App() {
               tUSD8 ({shortAddr(AEVUM_NETWORK.contracts.tUSD8)}) <ExternalLink size={12} />
             </a>
             {wallet.account && (
-              <div className="mono" style={{ marginTop: 4, color: "#a7f3d0" }}>
+              <div className="mono text-ok" style={{ marginTop: 4 }}>
                 Connected: {wallet.account} · Gas: {wallet.tQdayBalance ? `${Number(wallet.tQdayBalance).toFixed(4)} tQDAY` : "—"} ·{" "}
                 tUSD8: {wallet.tUsd8Balance !== null ? `${formatTUSD8(wallet.tUsd8Balance)} tUSD8` : "Switch to 44005"}
               </div>
             )}
             {wallet.error && (
-              <div style={{ marginTop: 4, color: "#fca5a5" }}>{wallet.error}</div>
+              <div className="text-err" style={{ marginTop: 4 }}>{wallet.error}</div>
             )}
           </div>
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <div className="network-inputs">
             <input
               className="input mono"
-              style={{ width: 220, padding: "6px 10px", fontSize: "0.75rem" }}
               placeholder="Registry 0x... (44005)"
               value={liveRegistryAddr}
               onChange={(e) => setLiveRegistryAddr(e.target.value)}
             />
             <input
               className="input mono"
-              style={{ width: 220, padding: "6px 10px", fontSize: "0.75rem" }}
               placeholder="Escrow 0x... (44005)"
               value={liveEscrowAddr}
               onChange={(e) => setLiveEscrowAddr(e.target.value)}
@@ -907,28 +902,28 @@ export default function App() {
         </section>
       )}
 
-      {/* KPI Strip */}
+      {/* Unified Hairline KPI Strip */}
       <section className="kpi-grid" aria-label="Protocol Metrics">
-        <div className="kpi-card">
+        <div className="kpi-cell">
           <div className="kpi-label">
             <span>Buyer Treasury (tUSD8)</span>
-            <span className="badge badge-emerald">6dp</span>
+            <span className="badge badge-ok">6dp</span>
           </div>
           <div className="kpi-value mono">{formatTUSD8(kpis.buyerBal)}</div>
           <div className="kpi-sub mono">{shortAddr(SIM_ADDRESSES.buyer)}</div>
         </div>
-        <div className="kpi-card">
+        <div className="kpi-cell">
           <div className="kpi-label">
             <span>Active Escrow Vault</span>
-            <Lock size={14} color="#38bdf8" />
+            <Lock size={14} color="var(--accent)" />
           </div>
           <div className="kpi-value mono">{formatTUSD8(kpis.escrowBal)}</div>
           <div className="kpi-sub">Protected by post-funding revocation exit</div>
         </div>
-        <div className="kpi-card">
+        <div className="kpi-cell">
           <div className="kpi-label">
             <span>Verified ERC-8004 Payees</span>
-            <Users size={14} color="#10b981" />
+            <Users size={14} color="var(--ok-ink)" />
           </div>
           <div className="kpi-value mono">
             {kpis.activePayees} / {kpis.totalPayees}
@@ -937,10 +932,10 @@ export default function App() {
             Strict ASCII handles · {kpis.totalPayees - kpis.activePayees} revoked kill-switch
           </div>
         </div>
-        <div className="kpi-card">
+        <div className="kpi-cell">
           <div className="kpi-label">
             <span>Spoofs Blocked / Settled</span>
-            <ShieldAlert size={14} color="#f59e0b" />
+            <ShieldAlert size={14} color="var(--warn-ink)" />
           </div>
           <div className="kpi-value mono">
             {kpis.blockedAttempts} Blocked · {kpis.settledCount} Settled
@@ -960,7 +955,7 @@ export default function App() {
             className={`tab-btn ${activeTab === id ? "active" : ""}`}
             onClick={() => setActiveTab(id)}
           >
-            <Icon size={16} />
+            <Icon size={15} />
             {label}
           </button>
         ))}
@@ -969,11 +964,11 @@ export default function App() {
       {/* TAB 1: CONFIRMATION-OF-PAYEE INSPECTOR */}
       {activeTab === "cop" && (
         <section className="grid-2">
-          <div className="card">
-            <h2 className="card-title">
-              <ShieldCheck size={19} color="#10b981" /> Pre-Flight Confirmation-of-Payee (CoP) Shield
+          <div className="panel">
+            <h2 className="section-title">
+              <ShieldCheck size={18} color="var(--accent)" /> Pre-Flight Confirmation-of-Payee (CoP) Shield
             </h2>
-            <p className="card-desc">
+            <p className="section-desc">
               Test how <span className="mono">ERC8004PayeeRegistry.verifyPayeeByHandle</span> stops Business Email
               Compromise (BEC), typosquat lookalikes, Cyrillic homoglyphs, and revoked wallets before a single base unit
               of <span className="mono">tUSD8</span> moves.
@@ -981,19 +976,19 @@ export default function App() {
 
             <div className="preset-row" aria-label="One-Click Judge Scenarios">
               <button type="button" className="preset-chip" onClick={() => applyPreset("exact")}>
-                <CheckCircle2 size={14} color="#10b981" /> Exact Match (acme.cloud)
+                <CheckCircle2 size={14} color="var(--ok-ink)" /> Exact Match (acme.cloud)
               </button>
               <button type="button" className="preset-chip" onClick={() => applyPreset("close")}>
-                <AlertTriangle size={14} color="#f59e0b" /> Close Match (Entity Diff)
+                <AlertTriangle size={14} color="var(--warn-ink)" /> Close Match (Entity Diff)
               </button>
               <button type="button" className="preset-chip" onClick={() => applyPreset("spoof")}>
-                <XCircle size={14} color="#ef4444" /> Lookalike Spoof (acrne.cloud)
+                <XCircle size={14} color="var(--err-ink)" /> Lookalike Spoof (acrne.cloud)
               </button>
               <button type="button" className="preset-chip" onClick={() => applyPreset("homoglyph")}>
-                <Ban size={14} color="#ef4444" /> Cyrillic Homoglyph (аcme.cloud)
+                <Ban size={14} color="var(--err-ink)" /> Cyrillic Homoglyph (аcme.cloud)
               </button>
               <button type="button" className="preset-chip" onClick={() => applyPreset("revoked")}>
-                <ShieldX size={14} color="#ef4444" /> Revoked Payee
+                <ShieldX size={14} color="var(--err-ink)" /> Revoked Payee
               </button>
             </div>
 
@@ -1033,12 +1028,12 @@ export default function App() {
             <div className="action-bar">
               {mode === "live" && (
                 <>
-                  <button type="button" className="btn btn-cyan" onClick={runLiveCoPCheck}>
+                  <button type="button" className="btn" onClick={runLiveCoPCheck}>
                     Query Live Aevum RPC (44005)
                   </button>
                   <input
                     className="input mono"
-                    style={{ width: 92, padding: "8px 10px" }}
+                    style={{ width: 92, padding: "7px 10px" }}
                     value={liveInvoiceIdInput}
                     onChange={(e) => setLiveInvoiceIdInput(e.target.value)}
                     aria-label="Live Invoice ID"
@@ -1053,25 +1048,23 @@ export default function App() {
                 Proceed to CoP-Gated Invoice Queue →
               </button>
             </div>
-            {liveStatusMsg && <div className="alert-banner amber">{liveStatusMsg}</div>}
+            {liveStatusMsg && <div className="alert-banner warn">{liveStatusMsg}</div>}
           </div>
 
           <div className={`verdict-box ${verdictTone}`}>
             <div className="verdict-header">
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {simCopEval.status === COP_STATUS.EXACT_MATCH ? (
-                  <ShieldCheck size={24} color="#10b981" />
+                  <ShieldCheck size={22} color="var(--ok-ink)" />
                 ) : simCopEval.status === COP_STATUS.CLOSE_MATCH_WARNING ||
                   simCopEval.status === COP_STATUS.WALLET_ROTATION_PENDING ? (
-                  <ShieldAlert size={24} color="#f59e0b" />
+                  <ShieldAlert size={22} color="var(--warn-ink)" />
                 ) : (
-                  <ShieldX size={24} color="#ef4444" />
+                  <ShieldX size={22} color="var(--err-ink)" />
                 )}
                 <div>
-                  <div style={{ fontSize: "0.72rem", color: "#94a3b8", textTransform: "uppercase" }}>
-                    On-Chain CoP Verdict
-                  </div>
-                  <div className="mono" style={{ fontSize: "1.05rem", fontWeight: 700 }} data-testid="cop-verdict">
+                  <div className="verdict-kicker">On-Chain CoP Verdict</div>
+                  <div className="mono verdict-code" data-testid="cop-verdict">
                     {simCopEval.status}
                   </div>
                 </div>
@@ -1079,21 +1072,21 @@ export default function App() {
               <span
                 className={`badge ${
                   simCopEval.status === COP_STATUS.EXACT_MATCH
-                    ? "badge-emerald"
+                    ? "badge-ok"
                     : simCopEval.status === COP_STATUS.CLOSE_MATCH_WARNING ||
                         simCopEval.status === COP_STATUS.WALLET_ROTATION_PENDING
-                      ? "badge-amber"
-                      : "badge-crimson"
+                      ? "badge-warn"
+                      : "badge-err"
                 }`}
               >
                 {simCopEval.status === COP_STATUS.EXACT_MATCH ? "SETTLEMENT PERMITTED" : "HARD-REVERT PROTECTED"}
               </span>
             </div>
 
-            <p style={{ margin: "0 0 10px", fontSize: "0.86rem" }}>{simCopEval.summary}</p>
+            <p className="verdict-summary">{simCopEval.summary}</p>
 
             {simCopEval.lookalike && (
-              <div className="alert-banner crimson">
+              <div className="alert-banner err">
                 <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
                 <div>
                   <strong>Lookalike Spoof Detected:</strong> Visual skeleton collides with verified merchant{" "}
@@ -1107,7 +1100,7 @@ export default function App() {
             <div className="kv-list">
               <div className="kv-row">
                 <span>Solidity Gate Result</span>
-                <span className="mono" style={{ color: simCopEval.revertError ? "#fca5a5" : "#6ee7b7" }}>
+                <span className={`mono ${simCopEval.revertError ? "text-err" : "text-ok"}`}>
                   {simCopEval.revertError || "PASS (0 wei risk)"}
                 </span>
               </div>
@@ -1138,7 +1131,7 @@ export default function App() {
             </div>
 
             {liveCopResult && (
-              <div className="alert-banner emerald" style={{ marginTop: 12 }}>
+              <div className="alert-banner ok" style={{ marginTop: 12 }}>
                 <div>
                   <strong>Live RPC 44005 Response:</strong> {liveCopResult.status} · Agent #{liveCopResult.agentId} ·
                   Wallet {shortAddr(liveCopResult.activeWallet)}
@@ -1175,42 +1168,40 @@ export default function App() {
               >
                 <div className="invoice-head">
                   <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <div className="invoice-meta-row">
                       <strong className="mono">#{inv.id} · {inv.reference}</strong>
                       <span
                         className={`badge ${
                           inv.status === "SETTLED"
-                            ? "badge-emerald"
+                            ? "badge-ok"
                             : inv.status === "FUNDED"
-                              ? "badge-cyan"
+                              ? "badge-accent"
                               : inv.status === "DISPUTED"
-                                ? "badge-amber"
-                                : inv.status === "REFUNDED"
-                                  ? "badge-slate"
-                                  : "badge-slate"
+                                ? "badge-warn"
+                                : "badge-neutral"
                         }`}
                       >
                         {inv.status}
                       </span>
-                      <span className="badge badge-cyan">{inv.mode === "INSTANT" ? "INSTANT SPLIT" : "MILESTONE ESCROW"}</span>
+                      <span className="badge badge-accent">{inv.mode === "INSTANT" ? "INSTANT SPLIT" : "MILESTONE ESCROW"}</span>
                       <span
                         className={`badge ${
                           liveCheck.status === COP_STATUS.EXACT_MATCH
-                            ? "badge-emerald"
+                            ? "badge-ok"
                             : liveCheck.status === COP_STATUS.WALLET_ROTATION_PENDING
-                              ? "badge-amber"
-                              : "badge-crimson"
+                              ? "badge-warn"
+                              : "badge-err"
                         }`}
                       >
                         CoP: {liveCheck.status}
                       </span>
                     </div>
-                    <p style={{ margin: "6px 0 0", fontSize: "0.84rem", color: "#94a3b8" }}>{inv.description}</p>
-                    <div className="mono" style={{ fontSize: "0.76rem", color: "#64748b", marginTop: 4 }}>
+                    <p className="invoice-desc">{inv.description}</p>
+                    <div className="mono invoice-payee-line">
                       Payee: {inv.expectedHandle} (ERC-8004 #{inv.payeeAgentId}) · Invoice Wallet:{" "}
                       {shortAddr(inv.expectedPayoutWallet)}
                       {payee && payee.payoutWallet.toLowerCase() !== inv.expectedPayoutWallet.toLowerCase() && (
-                        <span style={{ color: "#f87171" }}>
+                        <span className="text-err">
                           {" "}
                           ≠ Registry Wallet ({shortAddr(payee.payoutWallet)})
                         </span>
@@ -1218,11 +1209,11 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div style={{ textAlign: "right" }}>
-                    <div className="mono" style={{ fontSize: "1.2rem", fontWeight: 700 }}>
-                      {formatTUSD8(inv.amount)} <span style={{ fontSize: "0.8rem", color: "#38bdf8" }}>tUSD8</span>
+                  <div className="invoice-amount-col">
+                    <div className="mono invoice-amount">
+                      {formatTUSD8(inv.amount)} <span className="text-accent" style={{ fontSize: "13px" }}>tUSD8</span>
                     </div>
-                    <div style={{ fontSize: "0.74rem", color: "#64748b" }}>
+                    <div className="invoice-policy-line">
                       {inv.requireAttestation ? "KYB Required" : "KYB Optional"} ·{" "}
                       {inv.strictNoPendingRotation ? "Strict Rotation Lock" : "Flex Rotation"}
                     </div>
@@ -1260,14 +1251,14 @@ export default function App() {
                 </div>
 
                 {inv.lastBlockReason && (
-                  <div className="alert-banner crimson">
+                  <div className="alert-banner err">
                     <ShieldX size={16} style={{ flexShrink: 0, marginTop: 2 }} />
                     <span className="mono">{inv.lastBlockReason}</span>
                   </div>
                 )}
 
                 {inv.receiptHash && (
-                  <div className="alert-banner emerald">
+                  <div className="alert-banner ok">
                     <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: 2 }} />
                     <div style={{ flex: 1 }}>
                       <strong>Deterministic On-Chain Receipt Hash:</strong>{" "}
@@ -1302,7 +1293,7 @@ export default function App() {
                         <button type="button" className="btn btn-primary btn-sm" onClick={() => handleReleaseEscrowSim(inv.id)}>
                           <CheckCircle2 size={14} /> Buyer Confirm &amp; Release Splits
                         </button>
-                        <button type="button" className="btn btn-amber btn-sm" onClick={() => handleOpenDisputeSim(inv.id)}>
+                        <button type="button" className="btn btn-warn btn-sm" onClick={() => handleOpenDisputeSim(inv.id)}>
                           <Scale size={14} /> Open Buyer Dispute
                         </button>
                         {!invInvalidated ? (
@@ -1310,7 +1301,7 @@ export default function App() {
                             <Ban size={14} /> Simulate Post-Funding Payee Compromise (Revoke)
                           </button>
                         ) : (
-                          <button type="button" className="btn btn-cyan btn-sm" onClick={() => handleEmergencyRefundSim(inv.id)}>
+                          <button type="button" className="btn btn-primary btn-sm" onClick={() => handleEmergencyRefundSim(inv.id)}>
                             <ShieldCheck size={14} /> Execute Emergency 100% Buyer Refund
                           </button>
                         )}
@@ -1319,8 +1310,8 @@ export default function App() {
                   })()}
 
                   {inv.status === "DISPUTED" && (
-                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, width: "100%" }}>
-                      <label className="mono" style={{ fontSize: "0.78rem", color: "#fcd34d" }}>
+                    <div className="dispute-bar">
+                      <label className="mono text-warn" style={{ fontSize: "12.5px" }}>
                         Arbiter Refund: {(sliderVal / 100).toFixed(0)}% Buyer / {((10000 - sliderVal) / 100).toFixed(0)}% Splits
                       </label>
                       <input
@@ -1333,13 +1324,13 @@ export default function App() {
                       />
                       <button
                         type="button"
-                        className="btn btn-amber btn-sm"
+                        className="btn btn-warn btn-sm"
                         onClick={() => handleResolveDisputeSim(inv.id, sliderVal)}
                       >
                         <Scale size={14} /> Arbiter Resolve Dispute
                       </button>
                       {findInvalidatedEscrowPayee(inv, sim.payees) && (
-                        <button type="button" className="btn btn-cyan btn-sm" onClick={() => handleEmergencyRefundSim(inv.id)}>
+                        <button type="button" className="btn btn-primary btn-sm" onClick={() => handleEmergencyRefundSim(inv.id)}>
                           Emergency 100% Refund
                         </button>
                       )}
@@ -1361,11 +1352,11 @@ export default function App() {
       {/* TAB 3: ISSUE MULTI-SPLIT INVOICE */}
       {activeTab === "issue" && (
         <section className="grid-2">
-          <form className="card" onSubmit={handleIssueInvoice}>
-            <h2 className="card-title">
-              <Split size={19} color="#38bdf8" /> Issue CoP-Bound tUSD8 Merchant Invoice
+          <form className="panel" onSubmit={handleIssueInvoice}>
+            <h2 className="section-title">
+              <Split size={18} color="var(--accent)" /> Issue CoP-Bound tUSD8 Merchant Invoice
             </h2>
-            <p className="card-desc">
+            <p className="section-desc">
               Lock the merchant's verified ERC-8004 handle, legal entity hash, active payout wallet, and up to 8
               verified BPS split recipients (exact sum <span className="mono">== 10,000</span>).
             </p>
@@ -1453,18 +1444,15 @@ export default function App() {
             </div>
 
             <div style={{ marginBottom: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <strong style={{ fontSize: "0.84rem" }}>Multi-Party BPS Splits (Every Leg ERC-8004 Verified)</strong>
-                <span className={`badge mono ${bpsSum === 10000 ? "badge-emerald" : "badge-crimson"}`}>
+              <div className="split-editor-head">
+                <strong style={{ fontSize: "13px" }}>Multi-Party BPS Splits (Every Leg ERC-8004 Verified)</strong>
+                <span className={`badge mono ${bpsSum === 10000 ? "badge-ok" : "badge-err"}`}>
                   Sum: {bpsSum} / 10000 bps
                 </span>
               </div>
 
               {invSplits.map((leg, idx) => (
-                <div
-                  key={`edit-leg-${idx}`}
-                  style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 0.7fr auto", gap: 8, marginBottom: 8 }}
-                >
+                <div key={`edit-leg-${idx}`} className="split-editor-row">
                   <select
                     className="select"
                     value={leg.agentId}
@@ -1527,7 +1515,7 @@ export default function App() {
               )}
             </div>
 
-            {issueError && <div className="alert-banner crimson">{issueError}</div>}
+            {issueError && <div className="alert-banner err">{issueError}</div>}
 
             <div className="action-bar">
               <button type="submit" className="btn btn-primary" disabled={bpsSum !== 10000 || parsedIssueAmount <= 0n}>
@@ -1536,35 +1524,37 @@ export default function App() {
             </div>
           </form>
 
-          <div className="card">
-            <h2 className="card-title">Dust-Free Split Settlement Preview</h2>
-            <p className="card-desc">
+          <div className="panel-bordered">
+            <h2 className="section-title">Dust-Free Split Settlement Preview</h2>
+            <p className="section-desc">
               Solidity assigns any integer division remainder (<span className="mono">amount - distributed</span>) to
               the final split leg so <strong className="mono">0 wei</strong> is ever trapped in the contract.
             </p>
             {previewSplits.length > 0 ? (
-              <table className="split-table">
-                <thead>
-                  <tr>
-                    <th>Role</th>
-                    <th>Payee</th>
-                    <th>BPS</th>
-                    <th>Exact Payout</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewSplits.map((leg, i) => (
-                    <tr key={`prev-${i}`}>
-                      <td>{leg.role}</td>
-                      <td className="mono">{leg.handle}</td>
-                      <td className="mono">{leg.bps}</td>
-                      <td className="mono">{formatTUSD8(leg.computedAmount)} tUSD8</td>
+              <div className="table-wrap">
+                <table className="split-table">
+                  <thead>
+                    <tr>
+                      <th>Role</th>
+                      <th>Payee</th>
+                      <th>BPS</th>
+                      <th>Exact Payout</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {previewSplits.map((leg, i) => (
+                      <tr key={`prev-${i}`}>
+                        <td>{leg.role}</td>
+                        <td className="mono">{leg.handle}</td>
+                        <td className="mono">{leg.bps}</td>
+                        <td className="mono">{formatTUSD8(leg.computedAmount)} tUSD8</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
-              <div className="alert-banner amber">Adjust BPS legs to equal exactly 10,000 bps to preview exact settlement amounts.</div>
+              <div className="alert-banner warn">Adjust BPS legs to equal exactly 10,000 bps to preview exact settlement amounts.</div>
             )}
           </div>
         </section>
@@ -1573,11 +1563,11 @@ export default function App() {
       {/* TAB 4: ERC-8004 IDENTITY REGISTRY */}
       {activeTab === "registry" && (
         <section className="grid-2">
-          <div className="card">
-            <h2 className="card-title">
-              <Users size={19} color="#10b981" /> ERC-8004 Payee Identities
+          <div className="panel">
+            <h2 className="section-title">
+              <Users size={18} color="var(--accent)" /> ERC-8004 Payee Identities
             </h2>
-            <p className="card-desc">
+            <p className="section-desc">
               Each payee is an ERC-721 identity NFT with normalized ASCII handle, timelocked payout wallet rotation,
               transfer-safe wallet auto-reset, and guardian emergency revocation.
             </p>
@@ -1600,23 +1590,23 @@ export default function App() {
                         <div className="mono" style={{ fontWeight: 600 }}>
                           {p.handle}
                         </div>
-                        <div style={{ fontSize: "0.73rem", color: "#94a3b8" }}>{p.legalName}</div>
+                        <div className="text-secondary" style={{ fontSize: "12px" }}>{p.legalName}</div>
                       </td>
                       <td className="mono">
                         {p.revoked ? "0x0000…0000" : shortAddr(p.payoutWallet)}
                         {p.pendingPayoutWallet && (
-                          <div style={{ fontSize: "0.71rem", color: "#f59e0b" }}>
+                          <div className="text-warn" style={{ fontSize: "11.5px" }}>
                             → {shortAddr(p.pendingPayoutWallet)} (1h lock)
                           </div>
                         )}
                       </td>
                       <td>
                         {p.revoked ? (
-                          <span className="badge badge-crimson">REVOKED</span>
+                          <span className="badge badge-err">REVOKED</span>
                         ) : p.pendingPayoutWallet ? (
-                          <span className="badge badge-amber">ROTATING</span>
+                          <span className="badge badge-warn">ROTATING</span>
                         ) : (
-                          <span className="badge badge-emerald">VERIFIED</span>
+                          <span className="badge badge-ok">VERIFIED</span>
                         )}
                       </td>
                       <td>
@@ -1624,7 +1614,7 @@ export default function App() {
                           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                             <button
                               type="button"
-                              className="btn btn-sm btn-amber"
+                              className="btn btn-sm btn-warn"
                               onClick={() => toggleRotationSim(p.agentId)}
                               title="Simulate timelocked payout wallet rotation"
                             >
@@ -1648,9 +1638,9 @@ export default function App() {
             </div>
           </div>
 
-          <form className="card" onSubmit={handleRegisterPayeeSim}>
-            <h2 className="card-title">Mint New ERC-8004 Payee Identity</h2>
-            <p className="card-desc">
+          <form className="panel-bordered" onSubmit={handleRegisterPayeeSim}>
+            <h2 className="section-title">Mint New ERC-8004 Payee Identity</h2>
+            <p className="section-desc">
               Enforces strict lowercase ASCII (<span className="mono">[a-z0-9._-]</span>) to block Unicode homoglyph
               registration attacks at the Solidity contract layer.
             </p>
@@ -1684,7 +1674,7 @@ export default function App() {
               />
             </div>
             {regMessage && (
-              <div className={`alert-banner ${regMessage.ok ? "emerald" : "crimson"}`}>{regMessage.text}</div>
+              <div className={`alert-banner ${regMessage.ok ? "ok" : "err"}`}>{regMessage.text}</div>
             )}
             <div className="action-bar">
               <button type="submit" className="btn btn-primary">
@@ -1697,9 +1687,9 @@ export default function App() {
 
       {/* Live Security & Settlement Audit Ledger */}
       <section className="audit-panel" aria-label="Security & Settlement Audit Trail">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <strong style={{ fontSize: "0.86rem" }}>Real-Time CoP Security &amp; Settlement Audit Trail</strong>
-          <span className="mono" style={{ fontSize: "0.74rem", color: "#64748b" }}>
+        <div className="audit-header">
+          <strong style={{ fontSize: "14px" }}>Real-Time CoP Security &amp; Settlement Audit Trail</strong>
+          <span className="mono text-muted" style={{ fontSize: "12px" }}>
             {sim.auditLog.length} event(s)
           </span>
         </div>
@@ -1710,25 +1700,21 @@ export default function App() {
                 <span
                   className={`badge ${
                     item.kind === "SUCCESS"
-                      ? "badge-emerald"
+                      ? "badge-ok"
                       : item.kind === "BLOCKED"
-                        ? "badge-crimson"
+                        ? "badge-err"
                         : item.kind === "WARN"
-                          ? "badge-amber"
-                          : "badge-cyan"
+                          ? "badge-warn"
+                          : "badge-accent"
                   }`}
                   style={{ marginRight: 8 }}
                 >
                   {item.kind}
                 </span>
                 <strong>{item.title}</strong>
-                <div className="mono" style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: 3 }}>
-                  {item.detail}
-                </div>
+                <div className="mono audit-item-detail">{item.detail}</div>
               </div>
-              <span className="mono" style={{ color: "#64748b", fontSize: "0.73rem" }}>
-                {item.time}
-              </span>
+              <span className="mono audit-item-time">{item.time}</span>
             </div>
           ))}
         </div>

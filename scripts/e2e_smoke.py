@@ -118,19 +118,39 @@ def run():
             page.get_by_role("button", name="Aevum Live (44005)").click()
             assert page.get_by_text("QDay Aevum Testnet (Chain ID 44005)", exact=True).is_visible()
 
-            # ---- Mobile 390x844 responsive check ----
+            # ---- Mobile 390x844 responsive check across ALL tabs + Live mode ----
             mctx = browser.new_context(viewport={"width": 390, "height": 844})
             mpage = mctx.new_page()
             mpage.on("console", lambda msg: console_errors.append(f"[mobile] {msg.text}") if msg.type == "error" else None)
             mpage.on("pageerror", lambda err: page_errors.append(f"[mobile] {err}"))
 
+            def assert_no_mobile_overflow(view_label: str):
+                metrics = mpage.evaluate("({ sw: document.documentElement.scrollWidth, iw: window.innerWidth })")
+                assert metrics["sw"] <= metrics["iw"] + 2, (
+                    f"Detected horizontal overflow on 390px mobile viewport in {view_label}: "
+                    f"scrollWidth={metrics['sw']} > innerWidth={metrics['iw']}"
+                )
+
             mpage.goto(url, wait_until="networkidle")
             assert mpage.get_by_test_id("cop-verdict").inner_text().strip() == "EXACT_MATCH"
-            # Verify no horizontal overflow on mobile
-            overflow = mpage.evaluate("document.documentElement.scrollWidth > window.innerWidth + 2")
-            assert not overflow, "Detected horizontal overflow on 390px mobile viewport!"
+            assert_no_mobile_overflow("Tab 1: CoP Inspector")
             if SCREENSHOT_DIR:
                 mpage.screenshot(path=str(SCREENSHOT_DIR / "mobile_cop.png"), full_page=True)
+
+            mpage.get_by_role("tab", name="Invoice Queue & Pay").click()
+            assert_no_mobile_overflow("Tab 2: Invoice Queue & Pay")
+            if SCREENSHOT_DIR:
+                mpage.screenshot(path=str(SCREENSHOT_DIR / "mobile_invoices.png"), full_page=True)
+
+            mpage.get_by_role("tab", name="Issue Split Invoice").click()
+            assert_no_mobile_overflow("Tab 3: Issue Split Invoice")
+
+            mpage.get_by_role("tab", name="ERC-8004 Registry").click()
+            assert_no_mobile_overflow("Tab 4: ERC-8004 Registry")
+
+            mpage.get_by_role("button", name="Aevum Live (44005)").click()
+            assert mpage.get_by_text("QDay Aevum Testnet (Chain ID 44005)", exact=True).is_visible()
+            assert_no_mobile_overflow("Aevum Live (44005)")
 
             browser.close()
     finally:
