@@ -15,9 +15,18 @@ export const AEVUM_NETWORK = {
     // Verified live on QDay Aevum Testnet (Chain ID 44005)
     tUSD8: "0x456569838f1d43009A91ebA4263147Afd7233483",
     faucet: "0xE5074CBbd046AFb491EB8692abD6cF7ECCC6dEE5",
-    // Populated automatically once `npm run deploy:aevum` completes with funded deployer
-    registry: "",
-    escrow: ""
+    // Deployed & live-verified on QDay Aevum Testnet (Chain ID 44005)
+    registry: "0x16ED19F18f4A127992863a73251609d3070A79a1",
+    escrow: "0x39cF3E460Ac8485b178076B24e1c40E40fbF6e23"
+  },
+  liveProof: {
+    deployer: "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856",
+    registryTx: "0xfe547cd0764e6043da032e76ca694d7a65b4628966845d40cbd064ada4c8c445",
+    escrowTx: "0xb1dbe2c04e5d76da086c352777d7563a90d56b5b769a87b19b7d544004e39928",
+    settledInvoice1Tx: "0x2641c8d956593460d70e0f0b31ab56e392ae4ead3342da90f1bc1a2a7c66fdba",
+    settledReceiptHash: "0xa576a8e3fa8432d0b64c99f74e66992db1a1f07137d0e8dccf519345fcee6edd",
+    openInvoice2Id: "2",
+    openInvoice2Tx: "0xd4605bedd66652ac47b83432a7e1e05e05cfef02d03daabfbba38d28563fc4f8"
   }
 };
 

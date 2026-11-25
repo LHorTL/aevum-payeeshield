@@ -42,8 +42,31 @@ Verified directly against live QDay Aevum JSON-RPC (`eth_chainId = 0xabe5`, `eth
 | **EVM Compilation Target** | `shanghai` (verified against live Aevum Blockscout contracts) |
 | **Native Gas Token** | `tQDAY` (18 decimals) |
 | **Official `tUSD8` Contract** | [`0x456569838f1d43009A91ebA4263147Afd7233483`](https://explorer-test.qday.info/address/0x456569838f1d43009A91ebA4263147Afd7233483) (EIP-1967 Proxy, `6` decimals) |
-| **Official QDay Faucet** | `https://faucet.qday.info` (Contract `0xE5074CBbd046AFb491EB8692abD6cF7ECCC6dEE5`, human Cloudflare Turnstile / reCAPTCHA gated; Discord backup `https://discord.gg/bYPhjmrSfK`) |
-| **Canonical ERC-8004 Singleton** | Not pre-deployed at Ethereum canonical `0x8004A169...` on `44005` (`eth_getCode = 0x`) — PayeeShield ships a fully spec-compliant `ERC8004PayeeRegistry.sol` |
+| **Live `ERC8004PayeeRegistry`** | [`0x16ED19F18f4A127992863a73251609d3070A79a1`](https://explorer-test.qday.info/address/0x16ED19F18f4A127992863a73251609d3070A79a1#code) (**LIVE & Source-Verified on Aevum Blockscout**) |
+| **Live `PayeeShieldInvoiceEscrow`** | [`0x39cF3E460Ac8485b178076B24e1c40E40fbF6e23`](https://explorer-test.qday.info/address/0x39cF3E460Ac8485b178076B24e1c40E40fbF6e23#code) (**LIVE & Source-Verified on Aevum Blockscout**) |
+| **Public Deployer Wallet** | [`0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856`](https://explorer-test.qday.info/address/0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856) (Dedicated testnet-only deployer) |
+| **Official QDay Faucet** | `https://faucet.qday.info` (Contract `0xE5074CBbd046AFb491EB8692abD6cF7ECCC6dEE5`; Discord `/faucet`: `https://discord.gg/bYPhjmrSfK`) |
+| **Canonical ERC-8004 Singleton** | Not pre-deployed at Ethereum canonical `0x8004A169...` on `44005` (`eth_getCode = 0x`) — PayeeShield deploys a fully spec-compliant `ERC8004PayeeRegistry.sol` |
+
+---
+
+## Live On-Chain End-to-End Verification Proofs (QDay Aevum `44005`)
+
+All contracts and settlement flows were executed live against official **`tUSD8` (`0x456569838f1d43009A91ebA4263147Afd7233483`)** on Chain ID `44005` (full JSON manifest in [`deployments/aevum-44005.json`](./deployments/aevum-44005.json)):
+
+| Step | On-Chain Action | Verified Explorer Proof (`explorer-test.qday.info`) |
+| :--- | :--- | :--- |
+| **1. Deploy Registry** | Deploy `ERC8004PayeeRegistry` (`rotationCooldown = 3600s`) | [`0xfe547cd0...a4c8c445`](https://explorer-test.qday.info/tx/0xfe547cd0764e6043da032e76ca694d7a65b4628966845d40cbd064ada4c8c445) |
+| **2. Deploy Escrow** | Deploy `PayeeShieldInvoiceEscrow` targeting live `tUSD8` + Registry | [`0xb1dbe2c0...04e39928`](https://explorer-test.qday.info/tx/0xb1dbe2c04e5d76da086c352777d7563a90d56b5b769a87b19b7d544004e39928) |
+| **3. Register Payees** | Mint 3 ERC-8004 Payee NFTs (`#1 acme.cloud`, `#2 eu.taxvault`, `#3 partner.ops`) | [`#1 0xb36ab1aa...`](https://explorer-test.qday.info/tx/0xb36ab1aa7558271b8d343bf0bf13fbd30e35c950ab79b7ee5365db4edd63fe0b) · [`#2 0x6057f4fb...`](https://explorer-test.qday.info/tx/0x6057f4fb56497b7edcb03cd615ebadac9c63e110174b91deb9f70b4d66a8e6f2) · [`#3 0xab677eb2...`](https://explorer-test.qday.info/tx/0xab677eb2d72c47085c0dbae8f910d0d3cc319803abe2504dd1dcb6f1afa4e0fc) |
+| **4. KYB Attestation** | Issue epoch-bound `AEVUM_KYB_V1` attestation on Agent `#1` | [`0xa9a89369...cc8ba3cf`](https://explorer-test.qday.info/tx/0xa9a89369b98d12c097b4a00f303433919f4a06314dce78b938636b2ccc8ba3cf) |
+| **5. Approve `tUSD8`** | Approve `2.000000 tUSD8` allowance to `PayeeShieldInvoiceEscrow` | [`0xf9ed5071...346549f`](https://explorer-test.qday.info/tx/0xf9ed5071f5dfb0e029a369179f0c60b80ee5f31ed961a2fc45420438f346549f) |
+| **6. Create Invoice #1** | Create `INSTANT` Invoice `#1` (`1.250003 tUSD8`, `85% / 10% / 5%` splits) | [`0xf5f318f2...37a454b1`](https://explorer-test.qday.info/tx/0xf5f318f2d506abfadd6002cd236e54761ac71d7c894e7d678b4e1f5837a454b1) |
+| **7. Live CoP Settlement** | Settle `1.250003 tUSD8` (`1.062502 + 0.125000 + 0.062501`, **`0 wei` dust**) | [`0x2641c8d9...7c66fdba`](https://explorer-test.qday.info/tx/0x2641c8d956593460d70e0f0b31ab56e392ae4ead3342da90f1bc1a2a7c66fdba) |
+| **8. Open Showcase #2** | Open `MILESTONE_ESCROW` Invoice `#2` (`0.500000 tUSD8`, `preflightCheck = true`) | [`0xd4605bed...563fc4f8`](https://explorer-test.qday.info/tx/0xd4605bedd66652ac47b83432a7e1e05e05cfef02d03daabfbba38d28563fc4f8) |
+
+- **Live On-Chain CoP Security Checks Verified**: `EXACT_MATCH` (`status = 1`, `isAttested = true`), `CLOSE_MATCH_WARNING` (`status = 2`), `NO_MATCH` (`status = 0`), Cyrillic homoglyph (`\u0430cme.cloud` -> `InvalidHandle()` revert), and spoofed payout address (`BuyerExpectationMismatch` hard-revert, `0 tUSD8` moved).
+- **Deterministic On-Chain Receipt Hash (Invoice #1)**: `0xa576a8e3fa8432d0b64c99f74e66992db1a1f07137d0e8dccf519345fcee6edd`.
 
 ---
 
@@ -135,16 +158,15 @@ Verified output:
 - Playwright E2E (`scripts/e2e_smoke.py`) passed all interactive flows across **Desktop (`1440×900`)** and **Mobile (`390×844`, zero horizontal overflow)** with **0 console errors and 0 page errors**.
 - Includes **Interactive Simulation Mode** (instant 10-second judge demo with zero wallet/gas friction) AND **Aevum Live Mode (Chain ID `44005`)** with automatic MetaMask `wallet_addEthereumChain` setup.
 
-### 4. One-Command Live Deployment to QDay Aevum Testnet (`44005`)
+### 4. Live Deployment & Verification Commands on QDay Aevum Testnet (`44005`)
 
-> **Live Deployment Status:** Official QDay Faucet (`https://faucet.qday.info`) enforces human Cloudflare Turnstile / reCAPTCHA verification (not bypassed). A fresh uncommitted local deployer wallet (`0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856`) is ready in local gitignored `.env`, and `npm run deploy:aevum` has been live-tested against `https://rpc-test.qday.info` (verified Chain ID `44005` and live `tUSD8` contract bytecode at `0x456569838f1d43009A91ebA4263147Afd7233483`).
-
-Once funded with `tQDAY` gas via [faucet.qday.info](https://faucet.qday.info) (or [QDay Discord](https://discord.gg/bYPhjmrSfK)):
+> **Live Deployment Status:** ✅ **LIVE & VERIFIED ON QDAY AEVUM TESTNET (`44005`)** — Both `ERC8004PayeeRegistry` (`0x16ED19F18f4A127992863a73251609d3070A79a1`) and `PayeeShieldInvoiceEscrow` (`0x39cF3E460Ac8485b178076B24e1c40E40fbF6e23`) are deployed, source-verified on Aevum Blockscout, and proven end-to-end with real `tUSD8` (`0x456569838f1d43009A91ebA4263147Afd7233483`) settlement (`0 wei` dust).
 
 ```bash
 npm run wallet:new      # Generates local uncommitted .env deployer (prints public address only)
 npm run deploy:aevum    # Deploys ERC8004PayeeRegistry + PayeeShieldInvoiceEscrow targeting live tUSD8
 npm run verify:aevum    # Verifies both contracts on https://explorer-test.qday.info
+npm run verify:live     # Executes live on-chain CoP checks & real tUSD8 3-way split settlement proof
 npm run web:build       # Rebuilds static web/dist with live deployed contract addresses
 ```
 

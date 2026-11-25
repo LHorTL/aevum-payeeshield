@@ -51,11 +51,11 @@ export default function App() {
   const [sim, setSim] = useState(() => createInitialSimState());
   const wallet = useAevumWallet();
 
-  // Live contract addresses (editable after deploying with `npm run deploy:aevum`)
+  // Live contract addresses (deployed & verified on QDay Aevum Testnet 44005)
   const [liveRegistryAddr, setLiveRegistryAddr] = useState(AEVUM_NETWORK.contracts.registry);
   const [liveEscrowAddr, setLiveEscrowAddr] = useState(AEVUM_NETWORK.contracts.escrow);
   const [liveStatusMsg, setLiveStatusMsg] = useState("");
-  const [liveInvoiceIdInput, setLiveInvoiceIdInput] = useState("1");
+  const [liveInvoiceIdInput, setLiveInvoiceIdInput] = useState(AEVUM_NETWORK.liveProof?.openInvoice2Id || "2");
 
   // CoP Inspector form state
   const [copHandle, setCopHandle] = useState("acme.cloud");
@@ -871,6 +871,32 @@ export default function App() {
             >
               tUSD8 ({shortAddr(AEVUM_NETWORK.contracts.tUSD8)}) <ExternalLink size={12} />
             </a>
+            <div className="mono" style={{ marginTop: 4, fontSize: "12px", color: "var(--ink-2)" }}>
+              Live Deployed:{" "}
+              <a
+                href={`${AEVUM_NETWORK.explorerUrl}/address/${AEVUM_NETWORK.contracts.registry}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Registry {shortAddr(AEVUM_NETWORK.contracts.registry)} <ExternalLink size={11} />
+              </a>{" "}
+              ·{" "}
+              <a
+                href={`${AEVUM_NETWORK.explorerUrl}/address/${AEVUM_NETWORK.contracts.escrow}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Escrow {shortAddr(AEVUM_NETWORK.contracts.escrow)} <ExternalLink size={11} />
+              </a>{" "}
+              ·{" "}
+              <a
+                href={`${AEVUM_NETWORK.explorerUrl}/tx/${AEVUM_NETWORK.liveProof.settledInvoice1Tx}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Settled 1.250003 tUSD8 Proof Tx <ExternalLink size={11} />
+              </a>
+            </div>
             {wallet.account && (
               <div className="mono text-ok" style={{ marginTop: 4 }}>
                 Connected: {wallet.account} · Gas: {wallet.tQdayBalance ? `${Number(wallet.tQdayBalance).toFixed(4)} tQDAY` : "—"} ·{" "}
@@ -1726,12 +1752,20 @@ export default function App() {
         </div>
         <div className="mono">
           Aevum Testnet 44005 ·{" "}
-          <a href={`${AEVUM_NETWORK.explorerUrl}/address/${AEVUM_NETWORK.contracts.tUSD8}`} target="_blank" rel="noreferrer">
-            tUSD8 Explorer
+          <a href={`${AEVUM_NETWORK.explorerUrl}/address/${AEVUM_NETWORK.contracts.registry}`} target="_blank" rel="noreferrer">
+            Registry ({shortAddr(AEVUM_NETWORK.contracts.registry)})
           </a>{" "}
           ·{" "}
-          <a href={AEVUM_NETWORK.faucetUrl} target="_blank" rel="noreferrer">
-            tQDAY / tUSD8 Faucet
+          <a href={`${AEVUM_NETWORK.explorerUrl}/address/${AEVUM_NETWORK.contracts.escrow}`} target="_blank" rel="noreferrer">
+            Escrow ({shortAddr(AEVUM_NETWORK.contracts.escrow)})
+          </a>{" "}
+          ·{" "}
+          <a href={`${AEVUM_NETWORK.explorerUrl}/tx/${AEVUM_NETWORK.liveProof.settledInvoice1Tx}`} target="_blank" rel="noreferrer">
+            Live tUSD8 Settlement Tx
+          </a>{" "}
+          ·{" "}
+          <a href={`${AEVUM_NETWORK.explorerUrl}/address/${AEVUM_NETWORK.contracts.tUSD8}`} target="_blank" rel="noreferrer">
+            tUSD8 Explorer
           </a>
         </div>
       </footer>

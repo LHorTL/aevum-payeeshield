@@ -10,6 +10,7 @@
     "wallet:new": "node scripts/generate-deployer.mjs",
     "deploy:local": "hardhat run scripts/deploy-hardhat.js",
     "deploy:aevum": "node scripts/deploy.mjs",
+    "verify:live": "node scripts/live-verify-aevum.mjs",
     "verify:aevum": "node scripts/verify-blockscout.mjs",
     "build": "npm --prefix web run build",
     "web:install": "node -e \"require('child_process').execSync('npm install',{cwd:'web',stdio:'inherit'})\"",

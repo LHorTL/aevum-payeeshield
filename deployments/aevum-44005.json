@@ -1,0 +1,135 @@
+{
+  "network": "QDay Aevum Testnet",
+  "chainId": 44005,
+  "rpcUrl": "https://rpc-test.qday.info",
+  "explorerUrl": "https://explorer-test.qday.info",
+  "deployedAt": "2026-11-25T18:41:55.209Z",
+  "deployer": "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856",
+  "arbiter": "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856",
+  "tUSD8": "0x456569838f1d43009A91ebA4263147Afd7233483",
+  "contracts": {
+    "ERC8004PayeeRegistry": {
+      "address": "0x16ED19F18f4A127992863a73251609d3070A79a1",
+      "txHash": "0xfe547cd0764e6043da032e76ca694d7a65b4628966845d40cbd064ada4c8c445",
+      "explorerUrl": "https://explorer-test.qday.info/address/0x16ED19F18f4A127992863a73251609d3070A79a1"
+    },
+    "PayeeShieldInvoiceEscrow": {
+      "address": "0x39cF3E460Ac8485b178076B24e1c40E40fbF6e23",
+      "txHash": "0xb1dbe2c04e5d76da086c352777d7563a90d56b5b769a87b19b7d544004e39928",
+      "explorerUrl": "https://explorer-test.qday.info/address/0x39cF3E460Ac8485b178076B24e1c40E40fbF6e23"
+    }
+  },
+  "liveProof": {
+    "verifiedAt": "2026-11-25T18:44:19.359Z",
+    "agentsRegistered": [
+      {
+        "agentId": 1,
+        "handle": "acme.cloud",
+        "kybAttested": true,
+        "payoutWallet": "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856"
+      },
+      {
+        "agentId": 2,
+        "handle": "eu.taxvault",
+        "kybAttested": false,
+        "payoutWallet": "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856"
+      },
+      {
+        "agentId": 3,
+        "handle": "partner.ops",
+        "kybAttested": false,
+        "payoutWallet": "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856"
+      }
+    ],
+    "copStaticChecks": {
+      "exactMatchStatus": 1,
+      "closeMatchStatus": 2,
+      "noMatchStatus": 0,
+      "cyrillicHomoglyphRejected": true,
+      "spoofedPayoutRevertVerified": true
+    },
+    "settledInvoice1": {
+      "invoiceId": 1,
+      "amountBaseUnits": "1250003",
+      "amountTUSD8": "1.250003",
+      "splits": [
+        {
+          "agentId": "1",
+          "recipientWallet": "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856",
+          "amountBaseUnits": "1062502",
+          "amountTUSD8": "1.062502",
+          "bps": 8500
+        },
+        {
+          "agentId": "2",
+          "recipientWallet": "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856",
+          "amountBaseUnits": "125000",
+          "amountTUSD8": "0.125",
+          "bps": 1000
+        },
+        {
+          "agentId": "3",
+          "recipientWallet": "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856",
+          "amountBaseUnits": "62501",
+          "amountTUSD8": "0.062501",
+          "bps": 500
+        }
+      ],
+      "escrowDustBaseUnits": "0",
+      "receiptHash": "0xa576a8e3fa8432d0b64c99f74e66992db1a1f07137d0e8dccf519345fcee6edd"
+    },
+    "openShowcaseInvoice2": {
+      "invoiceId": 2,
+      "mode": "MILESTONE_ESCROW",
+      "amountTUSD8": "0.5",
+      "preflightPayableNow": true,
+      "preflightReason": "EXACT_MATCH_READY"
+    },
+    "remainingBalances": {
+      "tQDAY": "0.988506052",
+      "tUSD8": "5.0"
+    },
+    "transactions": {
+      "registerMerchant": {
+        "hash": "0xb36ab1aa7558271b8d343bf0bf13fbd30e35c950ab79b7ee5365db4edd63fe0b",
+        "blockNumber": 4110543,
+        "explorerUrl": "https://explorer-test.qday.info/tx/0xb36ab1aa7558271b8d343bf0bf13fbd30e35c950ab79b7ee5365db4edd63fe0b"
+      },
+      "registerTaxVault": {
+        "hash": "0x6057f4fb56497b7edcb03cd615ebadac9c63e110174b91deb9f70b4d66a8e6f2",
+        "blockNumber": 4110550,
+        "explorerUrl": "https://explorer-test.qday.info/tx/0x6057f4fb56497b7edcb03cd615ebadac9c63e110174b91deb9f70b4d66a8e6f2"
+      },
+      "registerAffiliate": {
+        "hash": "0xab677eb2d72c47085c0dbae8f910d0d3cc319803abe2504dd1dcb6f1afa4e0fc",
+        "blockNumber": 4110557,
+        "explorerUrl": "https://explorer-test.qday.info/tx/0xab677eb2d72c47085c0dbae8f910d0d3cc319803abe2504dd1dcb6f1afa4e0fc"
+      },
+      "issueKybAttestation": {
+        "hash": "0xa9a89369b98d12c097b4a00f303433919f4a06314dce78b938636b2ccc8ba3cf",
+        "blockNumber": 4110564,
+        "explorerUrl": "https://explorer-test.qday.info/tx/0xa9a89369b98d12c097b4a00f303433919f4a06314dce78b938636b2ccc8ba3cf"
+      },
+      "approveTUSD8": {
+        "hash": "0xf9ed5071f5dfb0e029a369179f0c60b80ee5f31ed961a2fc45420438f346549f",
+        "blockNumber": 4110572,
+        "explorerUrl": "https://explorer-test.qday.info/tx/0xf9ed5071f5dfb0e029a369179f0c60b80ee5f31ed961a2fc45420438f346549f"
+      },
+      "createInvoice1": {
+        "hash": "0xf5f318f2d506abfadd6002cd236e54761ac71d7c894e7d678b4e1f5837a454b1",
+        "blockNumber": 4110580,
+        "explorerUrl": "https://explorer-test.qday.info/tx/0xf5f318f2d506abfadd6002cd236e54761ac71d7c894e7d678b4e1f5837a454b1"
+      },
+      "settleInvoice1": {
+        "hash": "0x2641c8d956593460d70e0f0b31ab56e392ae4ead3342da90f1bc1a2a7c66fdba",
+        "blockNumber": 4110587,
+        "explorerUrl": "https://explorer-test.qday.info/tx/0x2641c8d956593460d70e0f0b31ab56e392ae4ead3342da90f1bc1a2a7c66fdba"
+      },
+      "createOpenInvoice2": {
+        "hash": "0xd4605bedd66652ac47b83432a7e1e05e05cfef02d03daabfbba38d28563fc4f8",
+        "blockNumber": 4110594,
+        "explorerUrl": "https://explorer-test.qday.info/tx/0xd4605bedd66652ac47b83432a7e1e05e05cfef02d03daabfbba38d28563fc4f8"
+      }
+    }
+  }
+}
