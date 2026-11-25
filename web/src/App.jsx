@@ -58,10 +58,23 @@ export default function App() {
   const [liveInvoiceIdInput, setLiveInvoiceIdInput] = useState(AEVUM_NETWORK.liveProof?.openInvoice2Id || "2");
 
   // CoP Inspector form state
+  const liveDefaultWallet = AEVUM_NETWORK.liveProof?.deployer || SIM_ADDRESSES.acmeMerchant;
   const [copHandle, setCopHandle] = useState("acme.cloud");
   const [copLegal, setCopLegal] = useState("Acme Cloud Infrastructure Ltd (SG-2026-8841)");
   const [copWallet, setCopWallet] = useState(SIM_ADDRESSES.acmeMerchant);
   const [liveCopResult, setLiveCopResult] = useState(null);
+  const [liveChecking, setLiveChecking] = useState(false);
+
+  const switchMode = (nextMode) => {
+    setMode(nextMode);
+    setLiveCopResult(null);
+    setLiveStatusMsg("");
+    if (nextMode === "live" && copWallet.toLowerCase() === SIM_ADDRESSES.acmeMerchant.toLowerCase()) {
+      setCopWallet(liveDefaultWallet);
+    } else if (nextMode === "sim" && copWallet.toLowerCase() === liveDefaultWallet.toLowerCase()) {
+      setCopWallet(SIM_ADDRESSES.acmeMerchant);
+    }
+  };
 
   // Issue Invoice form state
   const [invMerchantId, setInvMerchantId] = useState(1);
@@ -128,14 +141,16 @@ export default function App() {
   // Preset helper for CoP Inspector
   const applyPreset = (preset) => {
     setLiveCopResult(null);
+    setLiveStatusMsg("");
+    const activeAcmeWallet = mode === "live" ? liveDefaultWallet : SIM_ADDRESSES.acmeMerchant;
     if (preset === "exact") {
       setCopHandle("acme.cloud");
       setCopLegal("Acme Cloud Infrastructure Ltd (SG-2026-8841)");
-      setCopWallet(SIM_ADDRESSES.acmeMerchant);
+      setCopWallet(activeAcmeWallet);
     } else if (preset === "close") {
       setCopHandle("acme.cloud");
       setCopLegal("Acme Cloud Holdings Offshore LLC");
-      setCopWallet(SIM_ADDRESSES.acmeMerchant);
+      setCopWallet(activeAcmeWallet);
     } else if (preset === "spoof") {
       setCopHandle("acrne.cloud"); // lookalike rn -> m
       setCopLegal("Acme Cloud Infrastructure Ltd (SG-2026-8841)");
@@ -159,10 +174,16 @@ export default function App() {
       setLiveStatusMsg("Enter a deployed ERC8004PayeeRegistry address on Chain ID 44005 first (see scripts/deploy.mjs).");
       return;
     }
+    if (!ethers.isAddress(copWallet)) {
+      setLiveStatusMsg("Enter a valid 0x payout wallet address before querying QDay Aevum RPC (44005).");
+      return;
+    }
+    setLiveChecking(true);
     try {
-      const provider = window.ethereum
-        ? new ethers.BrowserProvider(window.ethereum)
-        : new ethers.JsonRpcProvider(AEVUM_NETWORK.rpcUrl);
+      const provider =
+        wallet.isOnAevum && window.ethereum
+          ? new ethers.BrowserProvider(window.ethereum)
+          : new ethers.JsonRpcProvider(AEVUM_NETWORK.rpcUrl);
       const reg = new ethers.Contract(liveRegistryAddr, REGISTRY_ABI, provider);
       const legalHash = copLegal.trim() ? hashText(copLegal.trim()) : ethers.ZeroHash;
       const res = await reg.verifyPayeeByHandle(copHandle, legalHash, copWallet);
@@ -172,10 +193,32 @@ export default function App() {
         agentId: res.resolvedAgentId.toString(),
         activeWallet: res.activePayoutWallet,
         hasPendingRotation: res.hasPendingRotation,
-        isAttested: res.isAttested
+        isAttested: res.isAttested,
+        revertError: null,
+        customSummary: null
       });
     } catch (e) {
-      setLiveStatusMsg(`On-chain revert/error: ${e?.shortMessage || e?.message}`);
+      const msg = e?.shortMessage || e?.message || String(e);
+      const isInvalidHandle =
+        msg.includes("InvalidHandle") ||
+        e?.revert?.name === "InvalidHandle" ||
+        e?.data === "0xc4b08e36";
+      if (isInvalidHandle) {
+        setLiveCopResult({
+          status: COP_STATUS.NO_MATCH,
+          agentId: "0",
+          activeWallet: ethers.ZeroAddress,
+          hasPendingRotation: false,
+          isAttested: false,
+          revertError: "REVERT InvalidHandle()",
+          customSummary:
+            "Live QDay Aevum (44005) ERC8004PayeeRegistry hard-reverted with InvalidHandle() — non-ASCII / Cyrillic homoglyph rejected on-chain."
+        });
+      } else {
+        setLiveStatusMsg(`On-chain revert/error: ${msg}`);
+      }
+    } finally {
+      setLiveChecking(false);
     }
   };
 
@@ -798,12 +841,96 @@ export default function App() {
     applyPreset("exact");
   };
 
-  const verdictTone =
-    simCopEval.status === COP_STATUS.EXACT_MATCH
-      ? "verdict-pass"
-      : simCopEval.status === COP_STATUS.CLOSE_MATCH_WARNING || simCopEval.status === COP_STATUS.WALLET_ROTATION_PENDING
-        ? "verdict-warn"
-        : "verdict-block";
+  const activeCopView = useMemo(() => {
+    if (mode === "live") {
+      if (liveCopResult) {
+        const isExact = liveCopResult.status === COP_STATUS.EXACT_MATCH;
+        const isWarn =
+          liveCopResult.status === COP_STATUS.CLOSE_MATCH_WARNING ||
+          liveCopResult.status === COP_STATUS.WALLET_ROTATION_PENDING;
+        const hasAgent = liveCopResult.agentId && liveCopResult.agentId !== "0";
+        const defaultSummary = isExact
+          ? `Live QDay Aevum (44005) ERC8004PayeeRegistry verified handle, legal entity hash, and bound payout wallet ${shortAddr(liveCopResult.activeWallet)}.`
+          : liveCopResult.status === COP_STATUS.CLOSE_MATCH_WARNING
+            ? `Live QDay Aevum (44005) matched handle & wallet for Agent #${liveCopResult.agentId}, but legal entity hash differs from on-chain registration.`
+            : liveCopResult.status === COP_STATUS.WALLET_ROTATION_PENDING
+              ? `Live QDay Aevum (44005) detected an active payout wallet rotation cooldown on Agent #${liveCopResult.agentId}; strict escrow mode blocks settlement.`
+              : liveCopResult.status === COP_STATUS.PAYEE_REVOKED
+                ? `Live QDay Aevum (44005) confirmed Agent #${liveCopResult.agentId} is guardian-revoked; all tUSD8 settlement paths hard-revert.`
+                : hasAgent
+                  ? `Live QDay Aevum (44005) mismatch: Agent #${liveCopResult.agentId} active payout wallet is ${shortAddr(liveCopResult.activeWallet)}, not ${shortAddr(copWallet)}.`
+                  : `Live QDay Aevum (44005) found no active ERC-8004 payee bound to handle '${copHandle.trim().toLowerCase()}'.`;
+        const defaultRevert = isExact
+          ? null
+          : liveCopResult.status === COP_STATUS.PAYEE_REVOKED
+            ? `REVERT PayeeRevoked(${liveCopResult.agentId})`
+            : liveCopResult.status === COP_STATUS.WALLET_ROTATION_PENDING
+              ? `REVERT PayeeRotationPending(${liveCopResult.agentId})`
+              : `REVERT PayeeMismatch(${liveCopResult.status})`;
+        const revertError = liveCopResult.revertError ?? defaultRevert;
+        return {
+          kicker: "Live QDay Aevum (44005) CoP Verdict",
+          status: liveCopResult.status,
+          tone: isExact ? "verdict-pass" : isWarn ? "verdict-warn" : "verdict-block",
+          iconKind: isExact ? "ok" : isWarn ? "warn" : "err",
+          badgeClass: isExact ? "badge-ok" : isWarn ? "badge-warn" : "badge-err",
+          badgeText: isExact ? "SETTLEMENT PERMITTED" : "HARD-REVERT PROTECTED",
+          summary: liveCopResult.customSummary || defaultSummary,
+          lookalike:
+            liveCopResult.status === COP_STATUS.NO_MATCH || liveCopResult.status === COP_STATUS.UNREGISTERED
+              ? simCopEval.lookalike
+              : null,
+          gateClass: revertError ? "text-err" : "text-ok",
+          gateText: revertError || "PASS (0 wei risk)",
+          resolvedNftText: hasAgent ? `#${liveCopResult.agentId} (${copHandle.trim().toLowerCase()})` : "None",
+          kybText: liveCopResult.isAttested ? "✓ ATTESTED (Aevum KYB #01)" : "✕ Unattested / Revoked"
+        };
+      }
+      return {
+        kicker: "Live QDay Aevum (44005) CoP Verdict",
+        status: liveChecking ? "QUERYING_RPC" : "AWAITING_RPC_QUERY",
+        tone: "",
+        iconKind: "accent",
+        badgeClass: "badge-accent",
+        badgeText: liveChecking ? "QUERYING 44005" : "LIVE RPC READY",
+        summary: `Ready to query live ERC8004PayeeRegistry (${shortAddr(liveRegistryAddr)}) on QDay Aevum Testnet (Chain ID 44005). Click "Query Live Aevum RPC (44005)" to verify '${copHandle || "handle"}' against live on-chain state.`,
+        lookalike: simCopEval.lookalike,
+        gateClass: "text-secondary",
+        gateText: liveChecking ? "Querying RPC 44005…" : "Pending Live RPC Call",
+        resolvedNftText: "Query Chain ID 44005",
+        kybText: "Query Chain ID 44005"
+      };
+    }
+
+    const isExact = simCopEval.status === COP_STATUS.EXACT_MATCH;
+    const isWarn =
+      simCopEval.status === COP_STATUS.CLOSE_MATCH_WARNING ||
+      simCopEval.status === COP_STATUS.WALLET_ROTATION_PENDING;
+    return {
+      kicker: "On-Chain CoP Verdict",
+      status: simCopEval.status,
+      tone: isExact ? "verdict-pass" : isWarn ? "verdict-warn" : "verdict-block",
+      iconKind: isExact ? "ok" : isWarn ? "warn" : "err",
+      badgeClass: isExact ? "badge-ok" : isWarn ? "badge-warn" : "badge-err",
+      badgeText: isExact ? "SETTLEMENT PERMITTED" : "HARD-REVERT PROTECTED",
+      summary: simCopEval.summary,
+      lookalike: simCopEval.lookalike,
+      gateClass: simCopEval.revertError ? "text-err" : "text-ok",
+      gateText: simCopEval.revertError || "PASS (0 wei risk)",
+      resolvedNftText: simCopEval.matchedPayee
+        ? `#${simCopEval.matchedPayee.agentId} (${simCopEval.matchedPayee.handle})`
+        : "None",
+      kybText: simCopEval.matchedPayee?.kybAttested ? "✓ ATTESTED (Aevum KYB #01)" : "✕ Unattested / Revoked"
+    };
+  }, [mode, liveCopResult, liveChecking, liveRegistryAddr, copHandle, copWallet, simCopEval]);
+
+  const liveBannerTone =
+    liveCopResult?.status === COP_STATUS.EXACT_MATCH
+      ? "ok"
+      : liveCopResult?.status === COP_STATUS.CLOSE_MATCH_WARNING ||
+          liveCopResult?.status === COP_STATUS.WALLET_ROTATION_PENDING
+        ? "warn"
+        : "err";
 
   return (
     <div className="app-shell">
@@ -827,14 +954,14 @@ export default function App() {
             <button
               type="button"
               className={`mode-btn ${mode === "sim" ? "active-sim" : ""}`}
-              onClick={() => setMode("sim")}
+              onClick={() => switchMode("sim")}
             >
               Interactive Simulation
             </button>
             <button
               type="button"
               className={`mode-btn ${mode === "live" ? "active-live" : ""}`}
-              onClick={() => setMode("live")}
+              onClick={() => switchMode("live")}
             >
               <Wallet size={14} /> Aevum Live (44005)
             </button>
@@ -871,7 +998,7 @@ export default function App() {
             >
               tUSD8 ({shortAddr(AEVUM_NETWORK.contracts.tUSD8)}) <ExternalLink size={12} />
             </a>
-            <div className="mono" style={{ marginTop: 4, fontSize: "12px", color: "var(--ink-2)" }}>
+            <div className="mono" style={{ marginTop: 4, fontSize: "12px", color: "var(--ink-secondary)" }}>
               Live Deployed:{" "}
               <a
                 href={`${AEVUM_NETWORK.explorerUrl}/address/${AEVUM_NETWORK.contracts.registry}`}
@@ -913,7 +1040,10 @@ export default function App() {
               className="input mono"
               placeholder="Registry 0x... (44005)"
               value={liveRegistryAddr}
-              onChange={(e) => setLiveRegistryAddr(e.target.value)}
+              onChange={(e) => {
+                setLiveRegistryAddr(e.target.value);
+                setLiveCopResult(null);
+              }}
             />
             <input
               className="input mono"
@@ -1024,7 +1154,11 @@ export default function App() {
                 id="cop-handle"
                 className="input mono"
                 value={copHandle}
-                onChange={(e) => setCopHandle(e.target.value)}
+                onChange={(e) => {
+                  setCopHandle(e.target.value);
+                  setLiveCopResult(null);
+                  setLiveStatusMsg("");
+                }}
                 placeholder="e.g. acme.cloud"
               />
             </div>
@@ -1035,7 +1169,11 @@ export default function App() {
                 id="cop-legal"
                 className="input"
                 value={copLegal}
-                onChange={(e) => setCopLegal(e.target.value)}
+                onChange={(e) => {
+                  setCopLegal(e.target.value);
+                  setLiveCopResult(null);
+                  setLiveStatusMsg("");
+                }}
                 placeholder="e.g. Acme Cloud Infrastructure Ltd (SG-2026-8841)"
               />
             </div>
@@ -1046,7 +1184,11 @@ export default function App() {
                 id="cop-wallet"
                 className="input mono"
                 value={copWallet}
-                onChange={(e) => setCopWallet(e.target.value)}
+                onChange={(e) => {
+                  setCopWallet(e.target.value);
+                  setLiveCopResult(null);
+                  setLiveStatusMsg("");
+                }}
                 placeholder="0x..."
               />
             </div>
@@ -1054,8 +1196,8 @@ export default function App() {
             <div className="action-bar">
               {mode === "live" && (
                 <>
-                  <button type="button" className="btn" onClick={runLiveCoPCheck}>
-                    Query Live Aevum RPC (44005)
+                  <button type="button" className="btn" onClick={runLiveCoPCheck} disabled={liveChecking}>
+                    {liveChecking ? "Querying Aevum RPC…" : "Query Live Aevum RPC (44005)"}
                   </button>
                   <input
                     className="input mono"
@@ -1077,48 +1219,45 @@ export default function App() {
             {liveStatusMsg && <div className="alert-banner warn">{liveStatusMsg}</div>}
           </div>
 
-          <div className={`verdict-box ${verdictTone}`}>
+          <div className={`verdict-box ${activeCopView.tone}`}>
             <div className="verdict-header">
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {simCopEval.status === COP_STATUS.EXACT_MATCH ? (
+                {activeCopView.iconKind === "ok" ? (
                   <ShieldCheck size={22} color="var(--ok-ink)" />
-                ) : simCopEval.status === COP_STATUS.CLOSE_MATCH_WARNING ||
-                  simCopEval.status === COP_STATUS.WALLET_ROTATION_PENDING ? (
+                ) : activeCopView.iconKind === "warn" ? (
                   <ShieldAlert size={22} color="var(--warn-ink)" />
+                ) : activeCopView.iconKind === "accent" ? (
+                  <ShieldCheck size={22} color="var(--accent)" />
                 ) : (
                   <ShieldX size={22} color="var(--err-ink)" />
                 )}
                 <div>
-                  <div className="verdict-kicker">On-Chain CoP Verdict</div>
+                  <div className="verdict-kicker">{activeCopView.kicker}</div>
                   <div className="mono verdict-code" data-testid="cop-verdict">
-                    {simCopEval.status}
+                    {activeCopView.status}
                   </div>
                 </div>
               </div>
-              <span
-                className={`badge ${
-                  simCopEval.status === COP_STATUS.EXACT_MATCH
-                    ? "badge-ok"
-                    : simCopEval.status === COP_STATUS.CLOSE_MATCH_WARNING ||
-                        simCopEval.status === COP_STATUS.WALLET_ROTATION_PENDING
-                      ? "badge-warn"
-                      : "badge-err"
-                }`}
-              >
-                {simCopEval.status === COP_STATUS.EXACT_MATCH ? "SETTLEMENT PERMITTED" : "HARD-REVERT PROTECTED"}
-              </span>
+              <span className={`badge ${activeCopView.badgeClass}`}>{activeCopView.badgeText}</span>
             </div>
 
-            <p className="verdict-summary">{simCopEval.summary}</p>
+            <p className="verdict-summary">{activeCopView.summary}</p>
 
-            {simCopEval.lookalike && (
+            {activeCopView.lookalike && (
               <div className="alert-banner err">
                 <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
                 <div>
                   <strong>Lookalike Spoof Detected:</strong> Visual skeleton collides with verified merchant{" "}
-                  <span className="mono">{simCopEval.lookalike.payee.handle}</span> (ERC-8004 #
-                  {simCopEval.lookalike.payee.agentId}, verified wallet{" "}
-                  <span className="mono">{shortAddr(simCopEval.lookalike.payee.payoutWallet)}</span>).
+                  <span className="mono">{activeCopView.lookalike.payee.handle}</span> (ERC-8004 #
+                  {activeCopView.lookalike.payee.agentId}, verified wallet{" "}
+                  <span className="mono">
+                    {shortAddr(
+                      mode === "live" && activeCopView.lookalike.payee.handle === "acme.cloud"
+                        ? liveDefaultWallet
+                        : activeCopView.lookalike.payee.payoutWallet
+                    )}
+                  </span>
+                  ).
                 </div>
               </div>
             )}
@@ -1126,9 +1265,7 @@ export default function App() {
             <div className="kv-list">
               <div className="kv-row">
                 <span>Solidity Gate Result</span>
-                <span className={`mono ${simCopEval.revertError ? "text-err" : "text-ok"}`}>
-                  {simCopEval.revertError || "PASS (0 wei risk)"}
-                </span>
+                <span className={`mono ${activeCopView.gateClass}`}>{activeCopView.gateText}</span>
               </div>
               <div className="kv-row">
                 <span>Expected Handle Hash</span>
@@ -1140,15 +1277,11 @@ export default function App() {
               </div>
               <div className="kv-row">
                 <span>Resolved ERC-8004 NFT</span>
-                <span className="mono">
-                  {simCopEval.matchedPayee ? `#${simCopEval.matchedPayee.agentId} (${simCopEval.matchedPayee.handle})` : "None"}
-                </span>
+                <span className="mono">{activeCopView.resolvedNftText}</span>
               </div>
               <div className="kv-row">
                 <span>KYB Attestation</span>
-                <span className="mono">
-                  {simCopEval.matchedPayee?.kybAttested ? "✓ ATTESTED (Aevum KYB #01)" : "✕ Unattested / Revoked"}
-                </span>
+                <span className="mono">{activeCopView.kybText}</span>
               </div>
               <div className="kv-row">
                 <span>EIP-712 Domain Chain ID</span>
@@ -1157,10 +1290,11 @@ export default function App() {
             </div>
 
             {liveCopResult && (
-              <div className="alert-banner ok" style={{ marginTop: 12 }}>
+              <div className={`alert-banner ${liveBannerTone}`} style={{ marginTop: 12 }}>
                 <div>
                   <strong>Live RPC 44005 Response:</strong> {liveCopResult.status} · Agent #{liveCopResult.agentId} ·
-                  Wallet {shortAddr(liveCopResult.activeWallet)}
+                  Wallet {shortAddr(liveCopResult.activeWallet)} · KYB{" "}
+                  {liveCopResult.isAttested ? "Attested" : "Unattested"}
                 </div>
               </div>
             )}

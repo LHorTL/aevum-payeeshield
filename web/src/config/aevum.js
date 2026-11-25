@@ -42,6 +42,7 @@ export const ERC20_ABI = [
 ];
 
 export const REGISTRY_ABI = [
+  "error InvalidHandle()",
   "function totalAgents() view returns (uint256)",
   "function rotationCooldown() view returns (uint64)",
   "function registerPayee(string handle, bytes32 legalEntityHash, string agentURI, (string metadataKey, bytes metadataValue)[] metadata) returns (uint256)",

@@ -114,9 +114,21 @@ def run():
             page.get_by_role("button", name="Register ERC-8004 Payee").click()
             assert page.get_by_text("Minted ERC-8004 Identity NFT #6").is_visible()
 
-            # Switch to Aevum Live (44005) mode & confirm banner renders cleanly
+            # Switch to Aevum Live (44005) mode & confirm banner + live wallet auto-switch render cleanly
+            page.get_by_role("tab", name="CoP Inspector").click()
+            page.get_by_role("button", name="Exact Match (acme.cloud)").click()
+            assert page.locator("#cop-wallet").input_value() == "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
             page.get_by_role("button", name="Aevum Live (44005)").click()
             assert page.get_by_text("QDay Aevum Testnet (Chain ID 44005)", exact=True).is_visible()
+            assert page.locator("#cop-wallet").input_value() == "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856"
+            assert page.get_by_test_id("cop-verdict").inner_text().strip() == "AWAITING_RPC_QUERY"
+            page.get_by_role("button", name="Close Match (Entity Diff)").click()
+            assert page.locator("#cop-wallet").input_value() == "0xB15f90BaB6BBc6f090D7522c4CFf3070CaFac856"
+            page.get_by_role("button", name="Exact Match (acme.cloud)").click()
+            page.get_by_role("button", name="Interactive Simulation").click()
+            assert page.locator("#cop-wallet").input_value() == "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+            assert page.get_by_test_id("cop-verdict").inner_text().strip() == "EXACT_MATCH"
+            page.get_by_role("button", name="Aevum Live (44005)").click()
 
             # ---- Mobile 390x844 responsive check across ALL tabs + Live mode ----
             mctx = browser.new_context(viewport={"width": 390, "height": 844})
